@@ -4938,7 +4938,7 @@ guide_command() {
         local xray_output
         local retries=5
         while [ $retries -gt 0 ]; do
-            xray_output=$(docker exec 3xui_app xray x25519 2>/dev/null) || true
+            xray_output=$(docker exec 3xui_app /app/bin/xray-linux-amd64 x25519 2>/dev/null) || true
             if [ -n "$xray_output" ]; then
                 private_key=$(echo "$xray_output" | grep "PrivateKey:" | awk '{print $2}' || true)
                 if [ -n "$private_key" ]; then
@@ -4955,7 +4955,7 @@ guide_command() {
     if [ "$key_generated" = false ]; then
         private_key="YOUR_PRIVATE_KEY_HERE"
         echo -e "${YELLOW}💡 3x-ui container not running. Generate keys with:${NC}"
-        echo -e "${GRAY}   docker exec 3xui_app xray x25519${NC}"
+        echo -e "${GRAY}   docker exec 3xui_app /app/bin/xray-linux-amd64 x25519${NC}"
         echo
     fi
 
@@ -4995,7 +4995,7 @@ guide_command() {
     echo -e "${GRAY}• ${WHITE}clients[]${GRAY} - Add your client configurations with UUIDs${NC}"
     echo -e "${GRAY}• ${WHITE}shortIds${GRAY} - Add your Reality short IDs${NC}"
     if [ "$key_generated" = false ]; then
-        echo -e "${GRAY}• ${WHITE}privateKey${GRAY} - Generate with: ${WHITE}docker exec 3xui_app xray x25519${NC}"
+        echo -e "${GRAY}• ${WHITE}privateKey${GRAY} - Generate with: ${WHITE}docker exec 3xui_app /app/bin/xray-linux-amd64 x25519${NC}"
     fi
     if [ -z "$domain" ]; then
         echo -e "${GRAY}• ${WHITE}serverNames${GRAY} - Your actual domain${NC}"
@@ -5013,7 +5013,7 @@ guide_command() {
 
     if [ "$key_generated" = false ]; then
         echo -e "${BLUE}🔐 Generate Reality Keys${NC}"
-        echo -e "${GRAY}Run: ${WHITE}docker exec 3xui_app xray x25519${NC}"
+        echo -e "${GRAY}Run: ${WHITE}docker exec 3xui_app /app/bin/xray-linux-amd64 x25519${NC}"
         echo -e "${GRAY}Use ${WHITE}PrivateKey${GRAY} in server config, ${WHITE}Password${GRAY} (public key) in client config${NC}"
         echo
     fi
