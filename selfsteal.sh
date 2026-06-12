@@ -1785,8 +1785,6 @@ validate_domain_dns() {
     fi
 }
 
-# Create Caddy configuration files
-
 # Create Nginx configuration files
 create_nginx_config() {
     local domain="$1"
@@ -4026,80 +4024,46 @@ edit_command() {
     
     echo -e "${WHITE}Select file to edit:${NC}"
     echo -e "   ${WHITE}1)${NC} ${GRAY}.env file (domain and port settings)${NC}"
-    if true; then
-        echo -e "   ${WHITE}2)${NC} ${GRAY}nginx.conf (main Nginx configuration)${NC}"
-        echo -e "   ${WHITE}3)${NC} ${GRAY}selfsteal.conf (site configuration)${NC}"
-        echo -e "   ${WHITE}4)${NC} ${GRAY}docker-compose.yml (Docker configuration)${NC}"
-    else
-        echo -e "   ${WHITE}2)${NC} ${GRAY}Caddyfile (Caddy configuration)${NC}"
-        echo -e "   ${WHITE}3)${NC} ${GRAY}docker-compose.yml (Docker configuration)${NC}"
-    fi
+    echo -e "   ${WHITE}2)${NC} ${GRAY}nginx.conf (main Nginx configuration)${NC}"
+    echo -e "   ${WHITE}3)${NC} ${GRAY}selfsteal.conf (site configuration)${NC}"
+    echo -e "   ${WHITE}4)${NC} ${GRAY}docker-compose.yml (Docker configuration)${NC}"
     echo -e "   ${WHITE}0)${NC} ${GRAY}Cancel${NC}"
     echo
     
-    if true; then
-        read -p "Select option [0-4]: " choice
-        
-        case "$choice" in
-            1)
-                ${EDITOR:-nano} "$APP_DIR/.env"
-                log_warning "Restart $server_name to apply changes: $APP_NAME restart"
-                ;;
-            2)
-                ${EDITOR:-nano} "$APP_DIR/nginx.conf"
-                read -p "Validate Nginx config after editing? [Y/n]: " -r validate_choice
-                if [[ ! $validate_choice =~ ^[Nn]$ ]]; then
-                    validate_nginx_config || true
-                fi
-                log_warning "Restart $server_name to apply changes: $APP_NAME restart"
-                ;;
-            3)
-                ${EDITOR:-nano} "$APP_DIR/conf.d/selfsteal.conf"
-                read -p "Validate Nginx config after editing? [Y/n]: " -r validate_choice
-                if [[ ! $validate_choice =~ ^[Nn]$ ]]; then
-                    validate_nginx_config || true
-                fi
-                log_warning "Restart $server_name to apply changes: $APP_NAME restart"
-                ;;
-            4)
-                ${EDITOR:-nano} "$APP_DIR/docker-compose.yml"
-                log_warning "Restart $server_name to apply changes: $APP_NAME restart"
-                ;;
-            0)
-                echo -e "${GRAY}Cancelled${NC}"
-                ;;
-            *)
-                log_error "Invalid option"
-                ;;
-        esac
-    else
-        read -p "Select option [0-3]: " choice
-        
-        case "$choice" in
-            1)
-                ${EDITOR:-nano} "$APP_DIR/.env"
-                log_warning "Restart $server_name to apply changes: $APP_NAME restart"
-                ;;
-            2)
-                ${EDITOR:-nano} "$APP_DIR/Caddyfile"
-                read -p "Validate Caddyfile after editing? [Y/n]: " -r validate_choice
-                if [[ ! $validate_choice =~ ^[Nn]$ ]]; then
-                    validate_caddyfile || true
-                fi
-                log_warning "Restart $server_name to apply changes: $APP_NAME restart"
-                ;;
-            3)
-                ${EDITOR:-nano} "$APP_DIR/docker-compose.yml"
-                log_warning "Restart $server_name to apply changes: $APP_NAME restart"
-                ;;
-            0)
-                echo -e "${GRAY}Cancelled${NC}"
-                ;;
-            *)
-                log_error "Invalid option"
-                ;;
-        esac
-    fi
+    read -p "Select option [0-4]: " choice
+    
+    case "$choice" in
+        1)
+            ${EDITOR:-nano} "$APP_DIR/.env"
+            log_warning "Restart $server_name to apply changes: $APP_NAME restart"
+            ;;
+        2)
+            ${EDITOR:-nano} "$APP_DIR/nginx.conf"
+            read -p "Validate Nginx config after editing? [Y/n]: " -r validate_choice
+            if [[ ! $validate_choice =~ ^[Nn]$ ]]; then
+                validate_nginx_config || true
+            fi
+            log_warning "Restart $server_name to apply changes: $APP_NAME restart"
+            ;;
+        3)
+            ${EDITOR:-nano} "$APP_DIR/conf.d/selfsteal.conf"
+            read -p "Validate Nginx config after editing? [Y/n]: " -r validate_choice
+            if [[ ! $validate_choice =~ ^[Nn]$ ]]; then
+                validate_nginx_config || true
+            fi
+            log_warning "Restart $server_name to apply changes: $APP_NAME restart"
+            ;;
+        4)
+            ${EDITOR:-nano} "$APP_DIR/docker-compose.yml"
+            log_warning "Restart $server_name to apply changes: $APP_NAME restart"
+            ;;
+        0)
+            echo -e "${GRAY}Cancelled${NC}"
+            ;;
+        *)
+            log_error "Invalid option"
+            ;;
+    esac
 }
 
 
@@ -4114,17 +4078,12 @@ show_help() {
     echo -e "${WHITE}Usage:${NC}"
     echo -e "  ${CYAN}$APP_NAME${NC} [${GRAY}command${NC}] [${GRAY}options${NC}]"
     echo
-    echo -e "${WHITE}Server Options:${NC}"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--nginx" "Use Nginx as web server"
-        echo
-    echo -e "${WHITE}Caddy Options:${NC}"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--h3, --quic" "Enable HTTP/3 (QUIC) — OFF by default"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--no-randomize" "Don't mutate templates on install"
-    echo
-    echo -e "${WHITE}Nginx Options:${NC}"
+    echo -e "${WHITE}Options:${NC}"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--install-3xui" "Install official 3x-ui natively"
     printf "   ${CYAN}%-22s${NC} %s\n" "--socket" "Use Unix socket (default)"
     printf "   ${CYAN}%-22s${NC} %s\n" "--tcp" "Use TCP port instead of socket"
     printf "   ${CYAN}%-22s${NC} %s\n" "--acme-port <port>" "Custom port for ACME TLS-ALPN"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--no-randomize" "Don't mutate templates on install"
     echo
     echo -e "${WHITE}Force Install Options:${NC}"
     printf "   ${CYAN}%-22s${NC} %s\n" "--force, -f" "Skip DNS validation and prompts"
@@ -4148,23 +4107,26 @@ show_help() {
     printf "   ${CYAN}%-12s${NC} %s\n" "edit" "✏️  Edit configuration files"
     printf "   ${CYAN}%-12s${NC} %s\n" "uninstall" "🗑️  Remove installation"
     printf "   ${CYAN}%-12s${NC} %s\n" "template" "🎨 Manage website templates"
-    printf "   ${CYAN}%-12s${NC} %s\n" "renew-ssl" "🔐 Renew SSL certificate (Nginx)"
+    printf "   ${CYAN}%-12s${NC} %s\n" "renew-ssl" "🔐 Renew SSL certificate"
     printf "   ${CYAN}%-12s${NC} %s\n" "menu" "📋 Show interactive menu"
     printf "   ${CYAN}%-12s${NC} %s\n" "update" "🔄 Check for script updates"
     echo
     echo -e "${WHITE}One-liner Install Examples:${NC}"
-    echo -e "  ${GRAY}# Nginx with auto ACME (interactive)${NC}"
-    echo -e "  ${CYAN}$APP_NAME --nginx install${NC}"
+    echo -e "  ${GRAY}# Install Nginx decoy with auto ACME (interactive)${NC}"
+    echo -e "  ${CYAN}$APP_NAME install${NC}"
     echo
     echo -e "  ${GRAY}# Force install with domain (skip prompts)${NC}"
-    echo -e "  ${CYAN}$APP_NAME --nginx --force --domain reality.example.com install${NC}"
+    echo -e "  ${CYAN}$APP_NAME --force --domain reality.example.com install${NC}"
     echo
     echo -e "  ${GRAY}# Force install with custom port and template${NC}"
-    echo -e "  ${CYAN}$APP_NAME --nginx --force --domain reality.example.com --port 8443 --template 5 install${NC}"
+    echo -e "  ${CYAN}$APP_NAME --force --domain reality.example.com --port 8443 --template 5 install${NC}"
     echo
     echo -e "  ${GRAY}# Install with manual wildcard certificate${NC}"
-    echo -e "  ${CYAN}$APP_NAME --nginx --force --domain reality.example.com \\${NC}"
+    echo -e "  ${CYAN}$APP_NAME --force --domain reality.example.com \\${NC}"
     echo -e "  ${CYAN}    --ssl-cert /path/to/fullchain.crt --ssl-key /path/to/private.key install${NC}"
+    echo
+    echo -e "  ${GRAY}# Install official 3x-ui natively${NC}"
+    echo -e "  ${CYAN}$APP_NAME --install-3xui${NC}"
     echo
     echo -e "${WHITE}Xray Reality Configuration:${NC}"
     echo -e "  ${GRAY}Socket mode (default):  \"target\": \"/dev/shm/nginx.sock\", \"xver\": 1${NC}"
@@ -4713,12 +4675,7 @@ main_menu() {
             10) clean_logs_command; read -p "Press Enter to continue..." ;;
             11) edit_command; read -p "Press Enter to continue..." ;;
             12) 
-                if true; then
-                    renew_ssl_command
-                else
-                    echo -e "${YELLOW}ℹ️  SSL renewal is only available for Nginx installations${NC}"
-                    echo -e "${GRAY}   Caddy manages SSL certificates automatically${NC}"
-                fi
+                renew_ssl_command
                 read -p "Press Enter to continue..."
                 ;;
             13) uninstall_command; read -p "Press Enter to continue..." ;;
