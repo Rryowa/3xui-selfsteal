@@ -1287,24 +1287,17 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --tcp)
-            # Use TCP port instead of Unix socket (nginx only)
+            # Use TCP port instead of Unix socket
             USE_SOCKET=false
-            if [ "$WEB_SERVER" != "nginx" ] && [ "$WEB_SERVER_EXPLICIT" != true ]; then
-                log_warning "--tcp flag is only applicable to Nginx, will be ignored for Caddy"
-            fi
             shift
             ;;
         --socket)
-            # Use Unix socket (default for nginx)
+            # Use Unix socket (default)
             USE_SOCKET=true
-            if [ "$WEB_SERVER" != "nginx" ] && [ "$WEB_SERVER_EXPLICIT" != true ]; then
-                log_warning "--socket flag is only applicable to Nginx, will be ignored for Caddy"
-            fi
             shift
             ;;
-        --h3|--quic|--enable-h3)
-            # Enable HTTP/3 (QUIC) in Caddy (off by default; Reality is TCP-only)
-            ENABLE_H3=true
+        --install-3xui)
+            INSTALL_3XUI=true
             shift
             ;;
         --no-randomize|--no-mutate)
@@ -4827,9 +4820,35 @@ main_menu() {
     done
 }
 
+install_3xui_native() {
+    check_running_as_root
+    log_info "Installing official 3x-ui natively..."
+    if ! command -v curl &>/dev/null; then
+        log_info "Installing curl..."
+        if command -v apt-get &>/dev/null; then
+            apt-get update && apt-get install -y curl
+        elif command -v yum &>/dev/null; then
+            yum install -y curl
+        elif command -v dnf &>/dev/null; then
+            dnf install -y curl
+        elif command -v pacman &>/dev/null; then
+            pacman -Sy --noconfirm curl
+        else
+            log_error "Package manager not found. Please install curl manually."
+            exit 1
+        fi
+    fi
+    bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+}
+
+if [ "${INSTALL_3XUI:-false}" = true ]; then
+    install_3xui_native
+    exit 0
+fi
+
 # Auto-detect existing installation if server wasn't specified via command line
-# This allows running commands on existing installation without --nginx/--caddy flag
-if [ "$COMMAND" != "install" ] && [ "$WEB_SERVER_EXPLICIT" = false ]; then
+# This allows running commands on existing installation
+if [ "$COMMAND" != "install" ]; then
     detect_existing_installation
 fi
 
@@ -4855,10 +4874,8 @@ case "$COMMAND" in
     --version|-v) echo "Selfsteal Management Script v$SCRIPT_VERSION" ;;
     --help|-h) show_help ;;
     "") 
-        # For menu mode without explicit server, try to detect existing installation
-        if [ "$WEB_SERVER_EXPLICIT" = false ]; then
-            detect_existing_installation
-        fi
+        # For menu mode, try to detect existing installation
+        detect_existing_installation
         main_menu 
         ;;
     *) 
