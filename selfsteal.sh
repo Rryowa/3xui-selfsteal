@@ -1267,7 +1267,7 @@ show_help() {
     echo -e "  ${CYAN}$APP_NAME${NC} [${GRAY}command${NC}] [${GRAY}options${NC}]"
     echo
     echo -e "${WHITE}Options:${NC}"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--install-3xui" "Install official 3x-ui natively"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--install-3xui" "Install official 3x-ui in Docker"
     printf "   ${CYAN}%-22s${NC} %s\n" "--socket" "Use Unix socket (default)"
     printf "   ${CYAN}%-22s${NC} %s\n" "--tcp" "Use TCP port instead of socket"
     printf "   ${CYAN}%-22s${NC} %s\n" "--acme-port <port>" "Custom port for ACME TLS-ALPN"
@@ -1313,7 +1313,7 @@ show_help() {
     echo -e "  ${CYAN}$APP_NAME --force --domain reality.example.com \\${NC}"
     echo -e "  ${CYAN}    --ssl-cert /path/to/fullchain.crt --ssl-key /path/to/private.key install${NC}"
     echo
-    echo -e "  ${GRAY}# Install official 3x-ui natively${NC}"
+    echo -e "  ${GRAY}# Install official 3x-ui in Docker${NC}"
     echo -e "  ${CYAN}$APP_NAME --install-3xui${NC}"
     echo
     echo -e "${WHITE}Xray Reality Configuration:${NC}"
