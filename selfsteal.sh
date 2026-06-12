@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ╔════════════════════════════════════════════════════════════════╗
 # ║  Selfsteal - Web Server for Reality Traffic Masking           ║
-# ║  Supports: Caddy (default) and Nginx (--nginx flag)           ║
+# ║  Supports: Nginx                                              ║
 # ║                                                                ║
 # ║  Project: gig.ovh                                              ║
 # ║  Author:  DigneZzZ (https://github.com/DigneZzZ)               ║
@@ -187,12 +187,12 @@ create_dir_safe() {
 #                          against Docker Hub rate limits. Tried first.
 #   - the rest             RU-reachable community mirrors, last resort only
 #                          (logged when used — they could substitute images).
-# Each mirror image is re-tagged to the bare reference (caddy:TAG / nginx:TAG)
+# Each mirror image is re-tagged to the bare reference (nginx:TAG)
 # so the unchanged docker-compose `image:` and `docker run ... validate` reuse
 # the local image with no further registry I/O.
 DOCKER_HUB_MIRRORS=("mirror.gcr.io" "dockerhub.timeweb.cloud" "huecker.io" "cr.yandex/mirror")
 
-# ensure_image <bare-ref>   e.g. caddy:2.11.4  or  nginx:1.29.3-alpine
+# ensure_image <bare-ref>   e.g. nginx:1.29.3-alpine
 # Guarantees the bare ref exists locally. Returns 0 on success, 1 if the image
 # cannot be obtained from Docker Hub or any mirror.
 ensure_image() {
@@ -1753,14 +1753,10 @@ validate_domain_dns() {
     echo -e "${GRAY}   • Domain must point to this server ✓${NC}"
     echo -e "${GRAY}   • Port 443 must be free for Xray ✓${NC}"
     echo -e "${GRAY}   • Port 80 will be used for HTTP → HTTPS redirects${NC}"
-    if [ "$WEB_SERVER" = "caddy" ]; then
-        echo -e "${GRAY}   • Caddy will serve content on internal port${NC}"
+    if [ "$USE_SOCKET" = true ]; then
+        echo -e "${GRAY}   • Nginx will use Unix socket: $SOCKET_PATH${NC}"
     else
-        if [ "$USE_SOCKET" = true ]; then
-            echo -e "${GRAY}   • Nginx will use Unix socket: $SOCKET_PATH${NC}"
-        else
-            echo -e "${GRAY}   • Nginx will serve content on internal port${NC}"
-        fi
+        echo -e "${GRAY}   • Nginx will serve content on internal port${NC}"
     fi
     echo -e "${GRAY}   • Configure Xray Reality AFTER installation${NC}"
     
@@ -2577,70 +2573,50 @@ install_command() {
     
     cd "$APP_DIR"
     
-    # Validate configuration based on web server type
-    if true; then
-        # Check SSL certificates exist
-        if [ ! -f "$APP_DIR/ssl/fullchain.crt" ] || [ ! -f "$APP_DIR/ssl/private.key" ]; then
-            log_error "SSL certificates not found!"
-            echo -e "${YELLOW}   Missing files in: $APP_DIR/ssl/${NC}"
-            echo -e "${GRAY}   Expected: fullchain.crt and private.key${NC}"
-            echo
-            echo -e "${WHITE}   Possible causes and solutions:${NC}"
-            echo
-            echo -e "${YELLOW}   1. acme.sh not installed${NC}"
-            echo -e "${GRAY}      Check: ls ~/.acme.sh/acme.sh${NC}"
-            echo -e "${GRAY}      Fix:   curl https://get.acme.sh | sh -s email=my@example.com${NC}"
-            echo
-            echo -e "${YELLOW}   2. Port blocked by firewall${NC}"
-            echo -e "${GRAY}      Check: ss -tlnp | grep 8443${NC}"
-            echo -e "${GRAY}      Fix:   ufw allow 8443/tcp  OR  iptables -A INPUT -p tcp --dport 8443 -j ACCEPT${NC}"
-            echo
-            echo -e "${YELLOW}   3. DNS not configured${NC}"
-            echo -e "${GRAY}      Check: nslookup \$(grep SELF_STEAL_DOMAIN $APP_DIR/.env | cut -d= -f2)${NC}"
-            echo -e "${GRAY}      Fix:   Add A record pointing to this server's IP${NC}"
-            echo
-            echo -e "${YELLOW}   4. Another service using port 8443${NC}"
-            echo -e "${GRAY}      Check: ss -tlnp | grep ':8443'${NC}"
-            echo -e "${GRAY}      Fix:   Stop the conflicting service or use --acme-port <other_port>${NC}"
-            echo
-            echo -e "${YELLOW}   5. Let's Encrypt rate limit${NC}"
-            echo -e "${GRAY}      Check: Wait 1 hour and try again${NC}"
-            echo -e "${GRAY}      Info:  https://letsencrypt.org/docs/rate-limits/${NC}"
-            echo
-            echo -e "${CYAN}   After fixing the issue, run: $APP_NAME renew-ssl${NC}"
-            return 1
-        fi
-        
-        log_info "Validating Nginx configuration..."
-        local nginx_validate_rc=0
-        validate_nginx_config || nginx_validate_rc=$?
-        if [ "$nginx_validate_rc" -eq 0 ]; then
-            log_success "Nginx configuration is valid"
-        elif [ "$nginx_validate_rc" -eq 2 ]; then
-            log_warning "Pre-flight validation skipped (could not pull nginx:${NGINX_VERSION}); continuing — 'docker compose up' will report any real image error"
-        else
-            log_error "Invalid Nginx configuration"
-            echo -e "${YELLOW}💡 Check configuration in: $APP_DIR/conf.d/${NC}"
-            return 1
-        fi
+    # Validate configuration
+    # Check SSL certificates exist
+    if [ ! -f "$APP_DIR/ssl/fullchain.crt" ] || [ ! -f "$APP_DIR/ssl/private.key" ]; then
+        log_error "SSL certificates not found!"
+        echo -e "${YELLOW}   Missing files in: $APP_DIR/ssl/${NC}"
+        echo -e "${GRAY}   Expected: fullchain.crt and private.key${NC}"
+        echo
+        echo -e "${WHITE}   Possible causes and solutions:${NC}"
+        echo
+        echo -e "${YELLOW}   1. acme.sh not installed${NC}"
+        echo -e "${GRAY}      Check: ls ~/.acme.sh/acme.sh${NC}"
+        echo -e "${GRAY}      Fix:   curl https://get.acme.sh | sh -s email=my@example.com${NC}"
+        echo
+        echo -e "${YELLOW}   2. Port blocked by firewall${NC}"
+        echo -e "${GRAY}      Check: ss -tlnp | grep 8443${NC}"
+        echo -e "${GRAY}      Fix:   ufw allow 8443/tcp  OR  iptables -A INPUT -p tcp --dport 8443 -j ACCEPT${NC}"
+        echo
+        echo -e "${YELLOW}   3. DNS not configured${NC}"
+        echo -e "${GRAY}      Check: nslookup \$(grep SELF_STEAL_DOMAIN $APP_DIR/.env | cut -d= -f2)${NC}"
+        echo -e "${GRAY}      Fix:   Add A record pointing to this server's IP${NC}"
+        echo
+        echo -e "${YELLOW}   4. Another service using port 8443${NC}"
+        echo -e "${GRAY}      Check: ss -tlnp | grep ':8443'${NC}"
+        echo -e "${GRAY}      Fix:   Stop the conflicting service or use --acme-port <other_port>${NC}"
+        echo
+        echo -e "${YELLOW}   5. Let's Encrypt rate limit${NC}"
+        echo -e "${GRAY}      Check: Wait 1 hour and try again${NC}"
+        echo -e "${GRAY}      Info:  https://letsencrypt.org/docs/rate-limits/${NC}"
+        echo
+        echo -e "${CYAN}   After fixing the issue, run: $APP_NAME renew-ssl${NC}"
+        return 1
+    fi
+    
+    log_info "Validating Nginx configuration..."
+    local nginx_validate_rc=0
+    validate_nginx_config || nginx_validate_rc=$?
+    if [ "$nginx_validate_rc" -eq 0 ]; then
+        log_success "Nginx configuration is valid"
+    elif [ "$nginx_validate_rc" -eq 2 ]; then
+        log_warning "Pre-flight validation skipped (could not pull nginx:${NGINX_VERSION}); continuing — 'docker compose up' will report any real image error"
     else
-        log_info "Validating Caddyfile..."
-        if [ ! -f "$APP_DIR/Caddyfile" ]; then
-            log_error "Caddyfile not found at $APP_DIR/Caddyfile"
-            return 1
-        fi
-
-        local caddy_validate_rc=0
-        validate_caddyfile || caddy_validate_rc=$?
-        if [ "$caddy_validate_rc" -eq 0 ]; then
-            log_success "Caddyfile is valid"
-        elif [ "$caddy_validate_rc" -eq 2 ]; then
-            log_warning "Pre-flight validation skipped (could not pull caddy:${CADDY_VERSION}); continuing — 'docker compose up' will report any real image error"
-        else
-            log_error "Invalid Caddyfile configuration"
-            echo -e "${YELLOW}💡 Check syntax: $APP_NAME edit${NC}"
-            return 1
-        fi
+        log_error "Invalid Nginx configuration"
+        echo -e "${YELLOW}💡 Check configuration in: $APP_DIR/conf.d/${NC}"
+        return 1
     fi
 
     # Ensure the runtime image is available (Docker Hub rate-limit / RU-block
@@ -2688,18 +2664,12 @@ install_command() {
     echo -e "${WHITE}📋 Next Steps:${NC}"
     echo -e "${GRAY}   • Configure your Xray Reality with:${NC}"
     echo -e "${GRAY}     - serverNames: [\"$domain\"]${NC}"
-    if true; then
-        if [ "$USE_SOCKET" = true ]; then
-            echo -e "${CYAN}     - target: \"$SOCKET_PATH\"${NC}"
-        else
-            echo -e "${CYAN}     - target: \"127.0.0.1:$port\"${NC}"
-        fi
-        echo -e "${CYAN}     - xver: 1${NC}"
+    if [ "$USE_SOCKET" = true ]; then
+        echo -e "${CYAN}     - target: \"$SOCKET_PATH\"${NC}"
     else
-        # Caddy doesn't support proxy_protocol
         echo -e "${CYAN}     - target: \"127.0.0.1:$port\"${NC}"
-        echo -e "${CYAN}     - xver: 0${NC}"
     fi
+    echo -e "${CYAN}     - xver: 1${NC}"
     echo -e "${GRAY}   • Change template: $APP_NAME template${NC}"
     echo -e "${GRAY}   • Customize HTML content in: $HTML_DIR${NC}"
     echo -e "${GRAY}   • Check status: $APP_NAME status${NC}"
@@ -3214,8 +3184,8 @@ create_default_html() {
 </head>
 <body>
     <div class="container">
-        <h1>🌐 Caddy</h1>
-        <p>Caddy server is running correctly and ready to serve your content.</p>
+        <h1>🌐 Nginx</h1>
+        <p>Nginx server is running correctly and ready to serve your content.</p>
         <div class="status">✅ Service Active</div>
         <div class="info">
             <h3>🎨 Ready for Templates</h3>
@@ -3511,29 +3481,15 @@ restart_command() {
     check_running_as_root
     
     local server_name
-    if true; then
-        server_name="Nginx"
-        read -p "Validate Nginx config before restart? [Y/n]: " -r validate_choice
-        if [[ ! $validate_choice =~ ^[Nn]$ ]]; then
-            local nginx_validate_rc=0
-            validate_nginx_config || nginx_validate_rc=$?
-            if [ "$nginx_validate_rc" -eq 1 ]; then
-                return 1
-            elif [ "$nginx_validate_rc" -eq 2 ]; then
-                log_warning "Validation skipped (could not pull nginx:${NGINX_VERSION}); restarting anyway"
-            fi
-        fi
-    else
-        server_name="Caddy"
-        read -p "Validate Caddyfile before restart? [Y/n]: " -r validate_choice
-        if [[ ! $validate_choice =~ ^[Nn]$ ]]; then
-            local caddy_validate_rc=0
-            validate_caddyfile || caddy_validate_rc=$?
-            if [ "$caddy_validate_rc" -eq 1 ]; then
-                return 1
-            elif [ "$caddy_validate_rc" -eq 2 ]; then
-                log_warning "Validation skipped (could not pull caddy:${CADDY_VERSION}); restarting anyway"
-            fi
+    server_name="Nginx"
+    read -p "Validate Nginx config before restart? [Y/n]: " -r validate_choice
+    if [[ ! $validate_choice =~ ^[Nn]$ ]]; then
+        local nginx_validate_rc=0
+        validate_nginx_config || nginx_validate_rc=$?
+        if [ "$nginx_validate_rc" -eq 1 ]; then
+            return 1
+        elif [ "$nginx_validate_rc" -eq 2 ]; then
+            log_warning "Validation skipped (could not pull nginx:${NGINX_VERSION}); restarting anyway"
         fi
     fi
 
@@ -3671,13 +3627,6 @@ renew_ssl_command() {
     if [ ! -d "$APP_DIR" ]; then
         log_error "Nginx is not installed"
         return 1
-    fi
-    
-    # Check if this is Nginx installation
-    if [ "$WEB_SERVER" != "nginx" ]; then
-        echo -e "${YELLOW}ℹ️  SSL renewal is only available for Nginx installations${NC}"
-        echo -e "${GRAY}   Caddy manages SSL certificates automatically via ACME${NC}"
-        return 0
     fi
     
     echo -e "${WHITE}🔐 SSL Certificate Renewal${NC}"
@@ -4191,13 +4140,13 @@ update_script() {
     echo -e "${WHITE}🔄 Updating script...${NC}"
     
     # Create backup
-    local backup_file="/tmp/caddy-selfsteal-backup-$(date +%Y%m%d_%H%M%S).sh"
+    local backup_file="/tmp/selfsteal-backup-$(date +%Y%m%d_%H%M%S).sh"
     if cp "$0" "$backup_file" 2>/dev/null; then
         echo -e "${GRAY}💾 Backup created: $backup_file${NC}"
     fi
     
     # Download new version
-    local temp_file="/tmp/caddy-selfsteal-update-$$.sh"
+    local temp_file="/tmp/selfsteal-update-$$.sh"
     
     if curl -fsSL "$UPDATE_URL" -o "$temp_file" 2>/dev/null; then
         # Verify downloaded file
@@ -4348,17 +4297,12 @@ EOF
     echo
 
     echo -e "${BLUE}🔧 How it works:${NC}"
-    if true; then
-        if [ "$connection_mode" != "tcp" ]; then
-            echo -e "${GRAY}1. Nginx listens on Unix Socket ($SOCKET_PATH)"
-        else
-            echo -e "${GRAY}1. Nginx runs on internal port (127.0.0.1:${port:-9443})"
-        fi
-        echo -e "${GRAY}2. Xray Reality forwards traffic via proxy_protocol (xver: 1)"
+    if [ "$connection_mode" != "tcp" ]; then
+        echo -e "${GRAY}1. Nginx listens on Unix Socket ($SOCKET_PATH)"
     else
-        echo -e "${GRAY}1. $server_name runs on internal port (127.0.0.1:${port:-9443})"
-        echo -e "${GRAY}2. Xray Reality forwards traffic directly (xver: 0)"
+        echo -e "${GRAY}1. Nginx runs on internal port (127.0.0.1:${port:-9443})"
     fi
+    echo -e "${GRAY}2. Xray Reality forwards traffic via proxy_protocol (xver: 1)"
     echo -e "${GRAY}3. Regular users see a normal website"
     echo -e "${GRAY}4. VPN clients connect through Reality protocol${NC}"
     echo
@@ -4367,7 +4311,7 @@ EOF
         echo -e "${GREEN}✅ Your Current Configuration:${NC}"
         echo -e "${WHITE}   Web Server:${NC} ${CYAN}$server_name${NC}"
         echo -e "${WHITE}   Domain:${NC} ${CYAN}$domain${NC}"
-        if [ "$WEB_SERVER" = "nginx" ] && [ "$connection_mode" != "tcp" ]; then
+        if [ "$connection_mode" != "tcp" ]; then
             echo -e "${WHITE}   Connection:${NC} ${CYAN}Unix Socket${NC}"
             echo -e "${WHITE}   Xray target:${NC} ${CYAN}$SOCKET_PATH${NC}"
         else
@@ -4457,12 +4401,7 @@ EOF
     fi
     echo
     
-    echo -e "${CYAN}📌 Important parameters:${NC}"
-    if true; then
-        echo -e "${WHITE}   xver: 1${NC} - proxy_protocol version (Nginx requires xver: 1)"
-    else
-        echo -e "${WHITE}   xver: 0${NC} - no proxy_protocol (Caddy requires xver: 0)"
-    fi
+    echo -e "${WHITE}   xver: 1${NC} - proxy_protocol version (Nginx requires xver: 1)"
     echo -e "${WHITE}   target: ${xray_target}${NC}"
     echo
 
