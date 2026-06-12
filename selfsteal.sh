@@ -160,6 +160,13 @@ log_error() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*" >> "$LOG_FILE" 2>/dev/null || true
 }
 
+# Safe clear function that won't fail if TERM is not set or not a TTY
+clear() {
+    if [ -t 1 ] && [ -n "${TERM:-}" ]; then
+        command clear 2>/dev/null || true
+    fi
+}
+
 # Error handler
 cleanup_on_error() {
     local exit_code=$?
@@ -1248,6 +1255,75 @@ show_ssl_certificate_info() {
     esac
     
     echo
+}
+
+show_help() {
+    local server_name
+    server_name="Nginx"
+    
+    echo -e "${WHITE}$server_name for Reality Selfsteal Management Script v$SCRIPT_VERSION${NC}"
+    echo
+    echo -e "${WHITE}Usage:${NC}"
+    echo -e "  ${CYAN}$APP_NAME${NC} [${GRAY}command${NC}] [${GRAY}options${NC}]"
+    echo
+    echo -e "${WHITE}Options:${NC}"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--install-3xui" "Install official 3x-ui natively"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--socket" "Use Unix socket (default)"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--tcp" "Use TCP port instead of socket"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--acme-port <port>" "Custom port for ACME TLS-ALPN"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--no-randomize" "Don't mutate templates on install"
+    echo
+    echo -e "${WHITE}Force Install Options:${NC}"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--force, -f" "Skip DNS validation and prompts"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--domain <domain>" "Domain for installation"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--port <port>" "HTTPS port (default: 9443)"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--template <1-11>" "Template number to install"
+    echo
+    echo -e "${WHITE}Manual SSL Certificate:${NC}"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--ssl-cert <path>" "Path to fullchain certificate"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--ssl-key <path>" "Path to private key"
+    echo
+    echo -e "${WHITE}Commands:${NC}"
+    printf "   ${CYAN}%-12s${NC} %s\n" "install" "🚀 Install $server_name for Reality masking"
+    printf "   ${CYAN}%-12s${NC} %s\n" "up" "▶️  Start $server_name services"
+    printf "   ${CYAN}%-12s${NC} %s\n" "down" "⏹️  Stop $server_name services"
+    printf "   ${CYAN}%-12s${NC} %s\n" "restart" "🔄 Restart $server_name services"
+    printf "   ${CYAN}%-12s${NC} %s\n" "status" "📊 Show service status"
+    printf "   ${CYAN}%-12s${NC} %s\n" "logs" "📝 Show service logs"
+    printf "   ${CYAN}%-12s${NC} %s\n" "logs-size" "📊 Show log sizes"
+    printf "   ${CYAN}%-12s${NC} %s\n" "clean-logs" "🧹 Clean all logs"
+    printf "   ${CYAN}%-12s${NC} %s\n" "edit" "✏️  Edit configuration files"
+    printf "   ${CYAN}%-12s${NC} %s\n" "uninstall" "🗑️  Remove installation"
+    printf "   ${CYAN}%-12s${NC} %s\n" "template" "🎨 Manage website templates"
+    printf "   ${CYAN}%-12s${NC} %s\n" "renew-ssl" "🔐 Renew SSL certificate"
+    printf "   ${CYAN}%-12s${NC} %s\n" "menu" "📋 Show interactive menu"
+    printf "   ${CYAN}%-12s${NC} %s\n" "update" "🔄 Check for script updates"
+    echo
+    echo -e "${WHITE}One-liner Install Examples:${NC}"
+    echo -e "  ${GRAY}# Install Nginx decoy with auto ACME (interactive)${NC}"
+    echo -e "  ${CYAN}$APP_NAME install${NC}"
+    echo
+    echo -e "  ${GRAY}# Force install with domain (skip prompts)${NC}"
+    echo -e "  ${CYAN}$APP_NAME --force --domain reality.example.com install${NC}"
+    echo
+    echo -e "  ${GRAY}# Force install with custom port and template${NC}"
+    echo -e "  ${CYAN}$APP_NAME --force --domain reality.example.com --port 8443 --template 5 install${NC}"
+    echo
+    echo -e "  ${GRAY}# Install with manual wildcard certificate${NC}"
+    echo -e "  ${CYAN}$APP_NAME --force --domain reality.example.com \\${NC}"
+    echo -e "  ${CYAN}    --ssl-cert /path/to/fullchain.crt --ssl-key /path/to/private.key install${NC}"
+    echo
+    echo -e "  ${GRAY}# Install official 3x-ui natively${NC}"
+    echo -e "  ${CYAN}$APP_NAME --install-3xui${NC}"
+    echo
+    echo -e "${WHITE}Xray Reality Configuration:${NC}"
+    echo -e "  ${GRAY}Socket mode (default):  \"target\": \"/dev/shm/nginx.sock\", \"xver\": 1${NC}"
+    echo -e "  ${GRAY}TCP mode:               \"target\": \"127.0.0.1:9443\", \"xver\": 1${NC}"
+    echo
+    echo -e "${WHITE}For more information, visit:${NC}"
+    echo -e "  ${BLUE}https://github.com/DigneZzZ/remnawave-scripts${NC}"
+    echo
+    echo -e "${GRAY}Project: gig.ovh | Author: DigneZzZ${NC}"
 }
 
 
@@ -4018,75 +4094,6 @@ edit_command() {
 
 
 
-show_help() {
-    local server_name
-    server_name="Nginx"
-    
-    echo -e "${WHITE}$server_name for Reality Selfsteal Management Script v$SCRIPT_VERSION${NC}"
-    echo
-    echo -e "${WHITE}Usage:${NC}"
-    echo -e "  ${CYAN}$APP_NAME${NC} [${GRAY}command${NC}] [${GRAY}options${NC}]"
-    echo
-    echo -e "${WHITE}Options:${NC}"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--install-3xui" "Install official 3x-ui natively"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--socket" "Use Unix socket (default)"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--tcp" "Use TCP port instead of socket"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--acme-port <port>" "Custom port for ACME TLS-ALPN"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--no-randomize" "Don't mutate templates on install"
-    echo
-    echo -e "${WHITE}Force Install Options:${NC}"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--force, -f" "Skip DNS validation and prompts"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--domain <domain>" "Domain for installation"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--port <port>" "HTTPS port (default: 9443)"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--template <1-11>" "Template number to install"
-    echo
-    echo -e "${WHITE}Manual SSL Certificate:${NC}"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--ssl-cert <path>" "Path to fullchain certificate"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--ssl-key <path>" "Path to private key"
-    echo
-    echo -e "${WHITE}Commands:${NC}"
-    printf "   ${CYAN}%-12s${NC} %s\n" "install" "🚀 Install $server_name for Reality masking"
-    printf "   ${CYAN}%-12s${NC} %s\n" "up" "▶️  Start $server_name services"
-    printf "   ${CYAN}%-12s${NC} %s\n" "down" "⏹️  Stop $server_name services"
-    printf "   ${CYAN}%-12s${NC} %s\n" "restart" "🔄 Restart $server_name services"
-    printf "   ${CYAN}%-12s${NC} %s\n" "status" "📊 Show service status"
-    printf "   ${CYAN}%-12s${NC} %s\n" "logs" "📝 Show service logs"
-    printf "   ${CYAN}%-12s${NC} %s\n" "logs-size" "📊 Show log sizes"
-    printf "   ${CYAN}%-12s${NC} %s\n" "clean-logs" "🧹 Clean all logs"
-    printf "   ${CYAN}%-12s${NC} %s\n" "edit" "✏️  Edit configuration files"
-    printf "   ${CYAN}%-12s${NC} %s\n" "uninstall" "🗑️  Remove installation"
-    printf "   ${CYAN}%-12s${NC} %s\n" "template" "🎨 Manage website templates"
-    printf "   ${CYAN}%-12s${NC} %s\n" "renew-ssl" "🔐 Renew SSL certificate"
-    printf "   ${CYAN}%-12s${NC} %s\n" "menu" "📋 Show interactive menu"
-    printf "   ${CYAN}%-12s${NC} %s\n" "update" "🔄 Check for script updates"
-    echo
-    echo -e "${WHITE}One-liner Install Examples:${NC}"
-    echo -e "  ${GRAY}# Install Nginx decoy with auto ACME (interactive)${NC}"
-    echo -e "  ${CYAN}$APP_NAME install${NC}"
-    echo
-    echo -e "  ${GRAY}# Force install with domain (skip prompts)${NC}"
-    echo -e "  ${CYAN}$APP_NAME --force --domain reality.example.com install${NC}"
-    echo
-    echo -e "  ${GRAY}# Force install with custom port and template${NC}"
-    echo -e "  ${CYAN}$APP_NAME --force --domain reality.example.com --port 8443 --template 5 install${NC}"
-    echo
-    echo -e "  ${GRAY}# Install with manual wildcard certificate${NC}"
-    echo -e "  ${CYAN}$APP_NAME --force --domain reality.example.com \\${NC}"
-    echo -e "  ${CYAN}    --ssl-cert /path/to/fullchain.crt --ssl-key /path/to/private.key install${NC}"
-    echo
-    echo -e "  ${GRAY}# Install official 3x-ui natively${NC}"
-    echo -e "  ${CYAN}$APP_NAME --install-3xui${NC}"
-    echo
-    echo -e "${WHITE}Xray Reality Configuration:${NC}"
-    echo -e "  ${GRAY}Socket mode (default):  \"target\": \"/dev/shm/nginx.sock\", \"xver\": 1${NC}"
-    echo -e "  ${GRAY}TCP mode:               \"target\": \"127.0.0.1:9443\", \"xver\": 1${NC}"
-    echo
-    echo -e "${WHITE}For more information, visit:${NC}"
-    echo -e "  ${BLUE}https://github.com/DigneZzZ/remnawave-scripts${NC}"
-    echo
-    echo -e "${GRAY}Project: gig.ovh | Author: DigneZzZ${NC}"
-}
-
 check_for_updates() {
     echo -e "${WHITE}🔍 Checking for updates...${NC}"
     
@@ -4229,35 +4236,13 @@ guide_command() {
     echo -e "${WHITE}📖 Selfsteal Setup Guide${NC}"
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 50))${NC}"
     echo
-    # Mandatory 3x-ui Docker Installation
-    log_info "Installing 3x-ui Panel (Docker)..."
-    local XUI_DIR="/opt/3x-ui"
-    create_dir_safe "$XUI_DIR"
-    
-    cat > "$XUI_DIR/docker-compose.yml" << 'EOF'
-services:
-  3xui:
-    image: ghcr.io/mhsanaei/3x-ui:latest
-    container_name: 3xui_app
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    volumes:
-      - ./db/:/etc/x-ui/
-      - ./cert/:/root/cert/
-      - /dev/shm:/dev/shm
-    environment:
-      XRAY_VMESS_AEAD_FORCED: "false"
-      XUI_ENABLE_FAIL2BAN: "true"
-    ports:
-      - "2053:2053"
-    restart: unless-stopped
-EOF
-    log_info "Starting 3x-ui container on port 2053..."
-    cd "$XUI_DIR" && docker compose up -d
-    cd - >/dev/null
-    log_success "3x-ui installed and started. Access it at port 2053."
-    
+
+    # 3x-ui Docker installation instruction info
+    echo -e "${BLUE}📦 3x-ui Installation:${NC}"
+    echo -e "${GRAY}To install the official 3x-ui panel in Docker, run:${NC}"
+    echo -e "  ${CYAN}$APP_NAME --install-3xui${NC}"
+    echo -e "${GRAY}This installs the panel in a Docker container (3xui_app) listening on port 2053.${NC}"
+    echo
 
     # Get current configuration
     local domain=""
@@ -4408,7 +4393,7 @@ EOF
     if [ "$key_generated" = false ]; then
         echo -e "${BLUE}🔐 Generate Reality Keys${NC}"
         echo -e "${GRAY}Run: ${WHITE}docker exec 3xui_app /app/bin/xray-linux-amd64 x25519${NC}"
-        echo -e "${GRAY}Use ${WHITE}PrivateKey${GRAY} in server config, ${WHITE}Password${GRAY} (public key) in client config${NC}"
+        echo -e "${GRAY}Use ${WHITE}PrivateKey${GRAY} in server config, ${WHITE}PublicKey${GRAY} in client config${NC}"
         echo
     fi
 
@@ -4628,29 +4613,51 @@ main_menu() {
     done
 }
 
-install_3xui_native() {
+install_3xui_docker() {
     check_running_as_root
-    log_info "Installing official 3x-ui natively..."
-    if ! command -v curl &>/dev/null; then
-        log_info "Installing curl..."
-        if command -v apt-get &>/dev/null; then
-            apt-get update && apt-get install -y curl
-        elif command -v yum &>/dev/null; then
-            yum install -y curl
-        elif command -v dnf &>/dev/null; then
-            dnf install -y curl
-        elif command -v pacman &>/dev/null; then
-            pacman -Sy --noconfirm curl
-        else
-            log_error "Package manager not found. Please install curl manually."
-            exit 1
-        fi
+    log_info "Installing official 3x-ui Panel in Docker..."
+    
+    # Check if Docker is installed
+    if ! command -v docker >/dev/null 2>&1; then
+        install_docker || { log_error "Docker is required but could not be installed."; exit 1; }
     fi
-    bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+    
+    local XUI_DIR="/opt/3x-ui"
+    create_dir_safe "$XUI_DIR"
+    
+    log_info "Creating docker-compose.yml for 3x-ui..."
+    cat > "$XUI_DIR/docker-compose.yml" << 'EOF'
+services:
+  3xui:
+    image: ghcr.io/mhsanaei/3x-ui:latest
+    container_name: 3xui_app
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./db/:/etc/x-ui/
+      - ./cert/:/root/cert/
+      - /dev/shm:/dev/shm
+    environment:
+      XRAY_VMESS_AEAD_FORCED: "false"
+      XUI_ENABLE_FAIL2BAN: "true"
+    network_mode: "host"
+    restart: unless-stopped
+EOF
+    
+    log_info "Starting 3x-ui container..."
+    cd "$XUI_DIR"
+    if docker compose up -d; then
+        log_success "3x-ui Docker container started successfully. Access it at port 2053."
+    else
+        log_error "Failed to start 3x-ui Docker container"
+        exit 1
+    fi
+    cd - >/dev/null
 }
 
 if [ "${INSTALL_3XUI:-false}" = true ]; then
-    install_3xui_native
+    install_3xui_docker
     exit 0
 fi
 
