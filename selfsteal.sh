@@ -2287,171 +2287,83 @@ install_command() {
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 50))${NC}"
     echo -e "${CYAN}📦 Web Server: $server_display_name${NC}"
     echo
-    # Mandatory 3x-ui Docker Installation
-    log_info "Installing 3x-ui Panel (Docker)..."
-    local XUI_DIR="/opt/3x-ui"
-    create_dir_safe "$XUI_DIR"
-    
-    cat > "$XUI_DIR/docker-compose.yml" << 'EOF'
-services:
-  3xui:
-    image: ghcr.io/mhsanaei/3x-ui:latest
-    container_name: 3xui_app
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    volumes:
-      - ./db/:/etc/x-ui/
-      - ./cert/:/root/cert/
-      - /dev/shm:/dev/shm
-    environment:
-      XRAY_VMESS_AEAD_FORCED: "false"
-      XUI_ENABLE_FAIL2BAN: "true"
-    ports:
-      - "2053:2053"
-    restart: unless-stopped
-EOF
-    log_info "Starting 3x-ui container on port 2053..."
-    cd "$XUI_DIR" && docker compose up -d
-    cd - >/dev/null
-    log_success "3x-ui installed and started. Access it at port 2053."
-    
-
-    # Check if already installed (any server)
+    # Check if already installed
     local existing_install=""
-    if [ -d "/opt/caddy" ] && [ -f "/opt/caddy/docker-compose.yml" ]; then
-        existing_install="caddy"
-    fi
     if [ -d "/opt/nginx-selfsteal" ] && [ -f "/opt/nginx-selfsteal/docker-compose.yml" ]; then
-        if [ -n "$existing_install" ]; then
-            # Both are installed - this shouldn't happen, but handle it
-            echo -e "${RED}❌ Error: Both Caddy and Nginx are installed!${NC}"
-            echo -e "${GRAY}   Please uninstall one of them first:${NC}"
-            echo -e "${GRAY}   selfsteal --caddy uninstall${NC}"
-            echo -e "${GRAY}   selfsteal --nginx uninstall${NC}"
-            return 1
-        fi
         existing_install="nginx"
     fi
     
     if [ -n "$existing_install" ]; then
-        local existing_name
-        if [ "$existing_install" = "nginx" ]; then
-            existing_name="Nginx"
-        else
-            existing_name="Caddy"
-        fi
+        echo -e "${YELLOW}⚠️  Nginx is already installed${NC}"
         
-        # Check if trying to install the same server
-        if [ "$existing_install" = "nginx" ]; then
-            echo -e "${YELLOW}⚠️  $existing_name is already installed${NC}"
-            
-            # In force mode, automatically reinstall
-            if [ "$FORCE_MODE" = true ]; then
-                log_info "Force mode: reinstalling $existing_name..."
-                local remove_dir
-                if [ "$existing_install" = "nginx" ]; then
-                    remove_dir="/opt/nginx-selfsteal"
-                else
-                    remove_dir="/opt/caddy"
-                fi
-                cd "$remove_dir" 2>/dev/null && docker compose down 2>/dev/null || true
-                rm -rf "$remove_dir"
-                log_success "Existing installation removed"
-            else
-                echo
-                echo -e "${WHITE}Options:${NC}"
-                echo -e "   ${WHITE}1)${NC} ${GRAY}Reinstall $existing_name${NC}"
-                echo -e "   ${WHITE}2)${NC} ${GRAY}Cancel${NC}"
-            fi
+        if [ "$FORCE_MODE" = true ]; then
+            log_info "Force mode: reinstalling Nginx..."
+            local remove_dir="/opt/nginx-selfsteal"
+            cd "$remove_dir" 2>/dev/null && docker compose down 2>/dev/null || true
+            rm -rf "$remove_dir"
+            log_success "Existing installation removed"
         else
-            # Trying to install different server
-            echo -e "${YELLOW}⚠️  $existing_name is already installed${NC}"
-            echo -e "${GRAY}   Only one web server can be installed at a time.${NC}"
+            echo
+            echo -e "${WHITE}Options:${NC}"
+            echo -e "   ${WHITE}1)${NC} ${GRAY}Reinstall Nginx${NC}"
+            echo -e "   ${WHITE}2)${NC} ${GRAY}Cancel${NC}"
             
-            # In force mode, automatically replace
-            if [ "$FORCE_MODE" = true ]; then
-                log_info "Force mode: replacing $existing_name with $server_display_name..."
-                local remove_dir
-                if [ "$existing_install" = "nginx" ]; then
-                    remove_dir="/opt/nginx-selfsteal"
-                else
-                    remove_dir="/opt/caddy"
-                fi
-                cd "$remove_dir" 2>/dev/null && docker compose down 2>/dev/null || true
-                rm -rf "$remove_dir"
-                log_success "Existing installation removed"
-            else
-                echo
-                echo -e "${WHITE}Options:${NC}"
-                echo -e "   ${WHITE}1)${NC} ${GRAY}Replace $existing_name with $server_display_name${NC}"
-                echo -e "   ${WHITE}2)${NC} ${GRAY}Cancel installation${NC}"
-            fi
-        fi
-        
-        # Interactive mode - ask user
-        if [ "$FORCE_MODE" != true ]; then
             echo
             read -p "Select option [1-2]: " reinstall_choice
-        
-        case "$reinstall_choice" in
-            1)
-                echo
-                local remove_dir
-                if [ "$existing_install" = "nginx" ]; then
-                    remove_dir="/opt/nginx-selfsteal"
-                else
-                    remove_dir="/opt/caddy"
-                fi
-                
-                # Check for unexpected files before removal
-                local expected_files="docker-compose.yml|\.env|nginx\.conf|Caddyfile|html|logs|ssl|conf\.d"
-                local unexpected_files=$(find "$remove_dir" -maxdepth 1 -type f -o -type d | grep -v "^$remove_dir$" | xargs -I{} basename {} | grep -vE "^($expected_files)$" 2>/dev/null)
-                
-                if [ -n "$unexpected_files" ]; then
-                    echo -e "${YELLOW}⚠️  Found unexpected files/folders in $remove_dir:${NC}"
-                    echo -e "${GRAY}$(echo "$unexpected_files" | head -10 | sed 's/^/   • /')${NC}"
-                    local total_unexpected=$(echo "$unexpected_files" | wc -l | tr -d ' ')
-                    if [ "$total_unexpected" -gt 10 ]; then
-                        echo -e "${GRAY}   ... and $((total_unexpected - 10)) more${NC}"
-                    fi
+            
+            case "$reinstall_choice" in
+                1)
                     echo
-                    echo -e "${WHITE}Options:${NC}"
-                    echo -e "   ${WHITE}1)${NC} ${GRAY}Create backup and continue${NC}"
-                    echo -e "   ${WHITE}2)${NC} ${GRAY}Delete everything without backup${NC}"
-                    echo -e "   ${WHITE}3)${NC} ${GRAY}Cancel installation${NC}"
-                    echo
-                    read -p "Select option [1-3]: " backup_choice
+                    local remove_dir="/opt/nginx-selfsteal"
                     
-                    case "$backup_choice" in
-                        1)
-                            local backup_dir="/opt/selfsteal-backup-$(date +%Y%m%d-%H%M%S)"
-                            log_info "Creating backup at $backup_dir..."
-                            cp -r "$remove_dir" "$backup_dir"
-                            log_success "Backup created: $backup_dir"
-                            ;;
-                        2)
-                            log_warning "Proceeding without backup..."
-                            ;;
-                        *)
-                            echo -e "${GRAY}Installation cancelled${NC}"
-                            return 0
-                            ;;
-                    esac
-                fi
-                
-                log_warning "Removing existing $existing_name installation..."
-                cd "$remove_dir" 2>/dev/null && docker compose down 2>/dev/null || true
-                rm -rf "$remove_dir"
-                log_success "Existing installation removed"
-                echo
-                ;;
-            *)
-                echo -e "${GRAY}Installation cancelled${NC}"
-                return 0
-                ;;
-        esac
-        fi  # End of interactive mode block for existing install
+                    # Check for unexpected files before removal
+                    local expected_files="docker-compose.yml|\.env|nginx\.conf|html|logs|ssl|conf\.d"
+                    local unexpected_files=$(find "$remove_dir" -maxdepth 1 -type f -o -type d | grep -v "^$remove_dir$" | xargs -I{} basename {} | grep -vE "^($expected_files)$" 2>/dev/null)
+                    
+                    if [ -n "$unexpected_files" ]; then
+                        echo -e "${YELLOW}⚠️  Found unexpected files/folders in $remove_dir:${NC}"
+                        echo -e "${GRAY}$(echo "$unexpected_files" | head -10 | sed 's/^/   • /')${NC}"
+                        local total_unexpected=$(echo "$unexpected_files" | wc -l | tr -d ' ')
+                        if [ "$total_unexpected" -gt 10 ]; then
+                            echo -e "${GRAY}   ... and $((total_unexpected - 10)) more${NC}"
+                        fi
+                        echo
+                        echo -e "${WHITE}Options:${NC}"
+                        echo -e "   ${WHITE}1)${NC} ${GRAY}Create backup and continue${NC}"
+                        echo -e "   ${WHITE}2)${NC} ${GRAY}Delete everything without backup${NC}"
+                        echo -e "   ${WHITE}3)${NC} ${GRAY}Cancel installation${NC}"
+                        echo
+                        read -p "Select option [1-3]: " backup_choice
+                        
+                        case "$backup_choice" in
+                            1)
+                                local backup_dir="/opt/selfsteal-backup-$(date +%Y%m%d-%H%M%S)"
+                                log_info "Creating backup at $backup_dir..."
+                                cp -r "$remove_dir" "$backup_dir"
+                                log_success "Backup created: $backup_dir"
+                                ;;
+                            2)
+                                log_warning "Proceeding without backup..."
+                                ;;
+                            *)
+                                echo -e "${GRAY}Installation cancelled${NC}"
+                                return 0
+                                ;;
+                        esac
+                    fi
+                    
+                    log_warning "Removing existing Nginx installation..."
+                    cd "$remove_dir" 2>/dev/null && docker compose down 2>/dev/null || true
+                    rm -rf "$remove_dir"
+                    log_success "Existing installation removed"
+                    echo
+                    ;;
+                *)
+                    echo -e "${GRAY}Installation cancelled${NC}"
+                    return 0
+                    ;;
+            esac
+        fi
     fi
 
     # Check system requirements
