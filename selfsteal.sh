@@ -71,31 +71,23 @@ FORCE_TEMPLATE=""
 MANUAL_SSL_CERT=""
 MANUAL_SSL_KEY=""
 
-# Web Server Selection (caddy or nginx)
-WEB_SERVER="caddy"
-WEB_SERVER_EXPLICIT=false
-WEB_SERVER_CONFIG_FILE=""
-
-# HTTP/3 (QUIC) for Caddy — DISABLED by default.
-# Reality forwards TCP only; advertising/serving QUIC on a TCP-only dest
-# is a needless fingerprint. Enable explicitly with --h3 / --quic if wanted.
-ENABLE_H3=false
+# Web Server Selection (Nginx only)
+WEB_SERVER_CONFIG_FILE="nginx.conf"
 
 # Per-install template mutation (anti-fingerprint) — ENABLED by default.
 # Makes each install byte-unique (title/brand/colors/noise) and strips known
 # provenance leaks (README, beacons, placeholder manifest). Disable: --no-randomize
 RANDOMIZE_TEMPLATE=true
 
-# Socket Configuration (nginx only)
+# Socket Configuration (Nginx only)
 # By default uses Unix socket for better performance
 # Use --tcp flag to switch to TCP port
 USE_SOCKET=true
 SOCKET_PATH="/dev/shm/nginx.sock"
 
-# Docker Configuration (will be set based on web server)
-CONTAINER_NAME=""
-VOLUME_PREFIX=""
-CADDY_VERSION="2.11.4"
+# Docker Configuration for Nginx decoy
+CONTAINER_NAME="nginx-selfsteal"
+VOLUME_PREFIX="nginx"
 NGINX_VERSION="1.29.3-alpine"
 
 # Paths Configuration (initialized by init_web_server_config)
@@ -261,11 +253,7 @@ ensure_image() {
 
 # Ensure the image for the currently selected web server is present locally.
 ensure_runtime_image() {
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        ensure_image "nginx:${NGINX_VERSION}"
-    else
-        ensure_image "caddy:${CADDY_VERSION}"
-    fi
+    ensure_image "nginx:${NGINX_VERSION}"
 }
 
 # ============================================
@@ -1277,16 +1265,6 @@ while [ $# -gt 0 ]; do
             echo "Selfsteal Management Script v$SCRIPT_VERSION"
             exit 0
             ;;
-        --nginx)
-            WEB_SERVER="nginx"
-            WEB_SERVER_EXPLICIT=true
-            shift
-            ;;
-        --caddy)
-            WEB_SERVER="caddy"
-            WEB_SERVER_EXPLICIT=true
-            shift
-            ;;
         --acme-port)
             if [ -n "$2" ] && [[ "$2" =~ ^[0-9]+$ ]]; then
                 ACME_PORT="$2"
@@ -1442,30 +1420,21 @@ done
 
 # Initialize web server configuration based on selection
 init_web_server_config() {
-    case "$WEB_SERVER" in
-        nginx)
-            CONTAINER_NAME="nginx-selfsteal"
-            VOLUME_PREFIX="nginx"
-            APP_DIR="/opt/nginx-selfsteal"
-            HTML_DIR="/opt/nginx-selfsteal/html"
-            WEB_SERVER_CONFIG_FILE="nginx.conf"
-            ;;
-        caddy|*)
-            CONTAINER_NAME="caddy-selfsteal"
-            VOLUME_PREFIX="caddy"
-            APP_DIR="/opt/caddy"
-            HTML_DIR="/opt/caddy/html"
-            WEB_SERVER_CONFIG_FILE="Caddyfile"
-            ;;
-    esac
+    WEB_SERVER="nginx"
+    CONTAINER_NAME="nginx-selfsteal"
+    VOLUME_PREFIX="nginx"
+    APP_DIR="/opt/nginx-selfsteal"
+    HTML_DIR="/opt/nginx-selfsteal/html"
+    WEB_SERVER_CONFIG_FILE="nginx.conf"
+    
+    # Ensure variables are exported
+    export APP_DIR HTML_DIR CONTAINER_NAME VOLUME_PREFIX WEB_SERVER
 }
 
 # Detect existing installation
 detect_existing_installation() {
     if [ -d "/opt/nginx-selfsteal" ] && [ -f "/opt/nginx-selfsteal/docker-compose.yml" ]; then
         WEB_SERVER="nginx"
-    elif [ -d "/opt/caddy" ] && [ -f "/opt/caddy/docker-compose.yml" ]; then
-        WEB_SERVER="caddy"
     fi
     init_web_server_config
 }
@@ -1824,329 +1793,6 @@ validate_domain_dns() {
 }
 
 # Create Caddy configuration files
-create_caddy_config() {
-    local domain="$1"
-    local port="$2"
-    
-    # Determine if using manual SSL certificates
-    local use_manual_ssl=false
-    local ssl_source="Automatic (Caddy internal)"
-    if [ -n "$MANUAL_SSL_CERT" ] && [ -n "$MANUAL_SSL_KEY" ]; then
-        use_manual_ssl=true
-        ssl_source="Manual (wildcard certificate)"
-    fi
-    
-    # Create .env file
-    cat > "$APP_DIR/.env" << EOF
-# Caddy for Reality Selfsteal Configuration
-# Web Server: Caddy
-# Domain Configuration
-SELF_STEAL_DOMAIN=$domain
-SELF_STEAL_PORT=$port
-
-# Generated on $(date)
-# Server IP: $NODE_IP
-# SSL: $ssl_source
-EOF
-
-    log_success ".env file created"
-    
-    # Handle manual SSL certificates
-    if [ "$use_manual_ssl" = true ]; then
-        echo
-        echo -e "${WHITE}🔐 SSL Certificate Configuration${NC}"
-        echo -e "${GRAY}$(printf '─%.0s' $(seq 1 40))${NC}"
-        echo
-        
-        log_info "Using manual SSL certificates..."
-        
-        # Create SSL directory
-        create_dir_safe "$APP_DIR/ssl" || return 1
-        
-        # Validate that files exist
-        if [ ! -f "$MANUAL_SSL_CERT" ]; then
-            log_error "SSL certificate file not found: $MANUAL_SSL_CERT"
-            return 1
-        fi
-        if [ ! -f "$MANUAL_SSL_KEY" ]; then
-            log_error "SSL key file not found: $MANUAL_SSL_KEY"
-            return 1
-        fi
-        
-        # Copy certificates to SSL directory
-        cp "$MANUAL_SSL_CERT" "$APP_DIR/ssl/fullchain.crt" || {
-            log_error "Failed to copy SSL certificate"
-            return 1
-        }
-        cp "$MANUAL_SSL_KEY" "$APP_DIR/ssl/private.key" || {
-            log_error "Failed to copy SSL key"
-            return 1
-        }
-        
-        # Set proper permissions
-        chmod 600 "$APP_DIR/ssl/private.key"
-        chmod 644 "$APP_DIR/ssl/fullchain.crt"
-        
-        log_success "Manual SSL certificates installed"
-        
-        # Validate certificate matches domain (or is wildcard)
-        local cert_domain
-        cert_domain=$(openssl x509 -in "$APP_DIR/ssl/fullchain.crt" -noout -subject 2>/dev/null | grep -oP 'CN\s*=\s*\K[^,]+' || true)
-        
-        if [ -n "$cert_domain" ]; then
-            echo -e "${GRAY}   Certificate CN: $cert_domain${NC}"
-            
-            # Check if it's a wildcard that matches
-            if [[ "$cert_domain" == "*."* ]]; then
-                local wildcard_base="${cert_domain#\*.}"
-                if [[ "$domain" == *".$wildcard_base" ]] || [[ "$domain" == "$wildcard_base" ]]; then
-                    log_success "Wildcard certificate matches domain"
-                else
-                    log_warning "Wildcard certificate may not match domain $domain"
-                fi
-            elif [ "$cert_domain" != "$domain" ]; then
-                log_warning "Certificate CN ($cert_domain) doesn't match domain ($domain)"
-            else
-                log_success "Certificate matches domain"
-            fi
-        fi
-    fi
-
-    # Create docker-compose.yml with or without SSL volume
-    if [ "$use_manual_ssl" = true ]; then
-        cat > "$APP_DIR/docker-compose.yml" << EOF
-services:
-  caddy:
-    image: caddy:${CADDY_VERSION}
-    container_name: ${CONTAINER_NAME}
-    restart: unless-stopped
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - ${HTML_DIR}:/var/www/html
-      - ./logs:/var/log/caddy
-      - ./ssl:/etc/caddy/ssl:ro
-      - ${VOLUME_PREFIX}_data:/data
-      - ${VOLUME_PREFIX}_config:/config
-    env_file:
-      - .env
-    network_mode: "host"
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-volumes:
-  ${VOLUME_PREFIX}_data:
-  ${VOLUME_PREFIX}_config:
-EOF
-        log_success "docker-compose.yml created (with manual SSL)"
-    else
-        cat > "$APP_DIR/docker-compose.yml" << EOF
-services:
-  caddy:
-    image: caddy:${CADDY_VERSION}
-    container_name: ${CONTAINER_NAME}
-    restart: unless-stopped
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - ${HTML_DIR}:/var/www/html
-      - ./logs:/var/log/caddy
-      - ${VOLUME_PREFIX}_data:/data
-      - ${VOLUME_PREFIX}_config:/config
-    env_file:
-      - .env
-    network_mode: "host"
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-volumes:
-  ${VOLUME_PREFIX}_data:
-  ${VOLUME_PREFIX}_config:
-EOF
-        log_success "docker-compose.yml created"
-    fi
-
-    # Create Caddyfile - different config for manual vs automatic SSL
-    if [ "$use_manual_ssl" = true ]; then
-        # Caddyfile with manual SSL certificates
-        cat > "$APP_DIR/Caddyfile" << 'EOF'
-{
-	https_port {$SELF_STEAL_PORT}
-	default_bind 127.0.0.1
-	servers {
-		protocols __CADDY_PROTOCOLS__
-		listener_wrappers {
-			proxy_protocol {
-				allow 127.0.0.1/32
-			}
-			tls
-		}
-	}
-	auto_https disable_redirects
-	# Disable the admin API (:2019). We never use `caddy reload`/admin here
-	# (Caddy is managed via docker compose), and its default bind resolves the
-	# hostname "localhost" — which fails under network_mode: host when the
-	# container has no 127.0.0.1 localhost entry, causing a boot loop.
-	admin off
-	log {
-		output file /var/log/caddy/access.log {
-			roll_size 10MB
-			roll_keep 5
-			roll_keep_for 720h
-		}
-		level ERROR
-		format json
-	}
-}
-
-http://{$SELF_STEAL_DOMAIN} {
-	bind 0.0.0.0
-	redir https://{$SELF_STEAL_DOMAIN}{uri} permanent
-	log {
-		output file /var/log/caddy/redirect.log {
-			roll_size 5MB
-			roll_keep 3
-			roll_keep_for 168h
-		}
-	}
-}
-
-https://{$SELF_STEAL_DOMAIN} {
-	# Compression (gzip only) + headers to mirror the mainstream nginx profile.
-	# zstd Content-Encoding is rare on real sites; gzip matches the working nginx.
-	encode gzip
-	header {
-		-Server
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "SAMEORIGIN"
-		X-XSS-Protection "1; mode=block"
-	}
-	tls /etc/caddy/ssl/fullchain.crt /etc/caddy/ssl/private.key
-	root * /var/www/html
-	try_files {path} /index.html
-	file_server
-	log {
-		output file /var/log/caddy/access.log {
-			roll_size 10MB
-			roll_keep 5
-			roll_keep_for 720h
-		}
-		level ERROR
-	}
-}
-
-:{$SELF_STEAL_PORT} {
-	tls internal
-	respond 204
-	log off
-}
-
-:80 {
-	bind 0.0.0.0
-	respond 204
-	log off
-}
-EOF
-        log_success "Caddyfile created (with manual SSL)"
-    else
-        # Caddyfile with automatic SSL (Caddy internal)
-        cat > "$APP_DIR/Caddyfile" << 'EOF'
-{
-	https_port {$SELF_STEAL_PORT}
-	default_bind 127.0.0.1
-	servers {
-		protocols __CADDY_PROTOCOLS__
-		listener_wrappers {
-			proxy_protocol {
-				allow 127.0.0.1/32
-			}
-			tls
-		}
-	}
-	auto_https disable_redirects
-	# Disable the admin API (:2019). We never use `caddy reload`/admin here
-	# (Caddy is managed via docker compose), and its default bind resolves the
-	# hostname "localhost" — which fails under network_mode: host when the
-	# container has no 127.0.0.1 localhost entry, causing a boot loop.
-	admin off
-	log {
-		output file /var/log/caddy/access.log {
-			roll_size 10MB
-			roll_keep 5
-			roll_keep_for 720h
-		}
-		level ERROR
-		format json
-	}
-}
-
-http://{$SELF_STEAL_DOMAIN} {
-	bind 0.0.0.0
-	redir https://{$SELF_STEAL_DOMAIN}{uri} permanent
-	log {
-		output file /var/log/caddy/redirect.log {
-			roll_size 5MB
-			roll_keep 3
-			roll_keep_for 168h
-		}
-	}
-}
-
-https://{$SELF_STEAL_DOMAIN} {
-	# Compression (gzip only) + headers to mirror the mainstream nginx profile.
-	# zstd Content-Encoding is rare on real sites; gzip matches the working nginx.
-	encode gzip
-	header {
-		-Server
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "SAMEORIGIN"
-		X-XSS-Protection "1; mode=block"
-	}
-	root * /var/www/html
-	try_files {path} /index.html
-	file_server
-	log {
-		output file /var/log/caddy/access.log {
-			roll_size 10MB
-			roll_keep 5
-			roll_keep_for 720h
-		}
-		level ERROR
-	}
-}
-
-:{$SELF_STEAL_PORT} {
-	tls internal
-	respond 204
-	log off
-}
-
-:80 {
-	bind 0.0.0.0
-	respond 204
-	log off
-}
-EOF
-        log_success "Caddyfile created"
-    fi
-
-    # Apply HTTP/3 toggle. Default = "h1 h2" (TCP-only, matches Reality + nginx).
-    # --h3/--quic switches to "h1 h2 h3" and lets Caddy advertise/serve QUIC.
-    local caddy_protocols="h1 h2"
-    if [ "${ENABLE_H3:-false}" = true ]; then
-        caddy_protocols="h1 h2 h3"
-    fi
-    sed -i "s|__CADDY_PROTOCOLS__|$caddy_protocols|g" "$APP_DIR/Caddyfile"
-    if [ "$caddy_protocols" = "h1 h2" ]; then
-        log_info "HTTP/3 (QUIC) disabled — TCP-only profile (enable with --h3 if you need it)"
-    else
-        log_warning "HTTP/3 (QUIC) enabled — note: Reality forwards TCP only, so QUIC/UDP is still not actually served"
-    fi
-}
 
 # Create Nginx configuration files
 create_nginx_config() {
@@ -2642,16 +2288,41 @@ install_command() {
     
     clear
     local server_display_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_display_name="Nginx"
-    else
-        server_display_name="Caddy"
-    fi
+    server_display_name="Nginx"
     
     echo -e "${WHITE}🚀 $server_display_name for Reality Selfsteal Installation${NC} - version: $SCRIPT_VERSION"
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 50))${NC}"
     echo -e "${CYAN}📦 Web Server: $server_display_name${NC}"
     echo
+    # Mandatory 3x-ui Docker Installation
+    log_info "Installing 3x-ui Panel (Docker)..."
+    local XUI_DIR="/opt/3x-ui"
+    create_dir_safe "$XUI_DIR"
+    
+    cat > "$XUI_DIR/docker-compose.yml" << 'EOF'
+services:
+  3xui:
+    image: ghcr.io/mhsanaei/3x-ui:latest
+    container_name: 3xui_app
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./db/:/etc/x-ui/
+      - ./cert/:/root/cert/
+      - /dev/shm:/dev/shm
+    environment:
+      XRAY_VMESS_AEAD_FORCED: "false"
+      XUI_ENABLE_FAIL2BAN: "true"
+    ports:
+      - "2053:2053"
+    restart: unless-stopped
+EOF
+    log_info "Starting 3x-ui container on port 2053..."
+    cd "$XUI_DIR" && docker compose up -d
+    cd - >/dev/null
+    log_success "3x-ui installed and started. Access it at port 2053."
+    
 
     # Check if already installed (any server)
     local existing_install=""
@@ -2679,7 +2350,7 @@ install_command() {
         fi
         
         # Check if trying to install the same server
-        if [ "$existing_install" = "$WEB_SERVER" ]; then
+        if [ "$existing_install" = "nginx" ]; then
             echo -e "${YELLOW}⚠️  $existing_name is already installed${NC}"
             
             # In force mode, automatically reinstall
@@ -2865,7 +2536,7 @@ install_command() {
         log_info "Force mode: using port $port"
     fi
     
-    if [ "$WEB_SERVER" = "nginx" ] && [ "$USE_SOCKET" = true ]; then
+    if [ "$USE_SOCKET" = true ]; then
         # Socket mode - no port needed for Xray communication
         if [ "$FORCE_MODE" != true ]; then
             echo
@@ -2898,7 +2569,7 @@ install_command() {
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Web Server:" "$server_display_name"
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Domain:" "$domain"
     
-    if [ "$WEB_SERVER" = "nginx" ] && [ "$USE_SOCKET" = true ]; then
+    if [ "$USE_SOCKET" = true ]; then
         printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Connection:" "Unix Socket"
         printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Socket Path:" "$SOCKET_PATH"
     else
@@ -2949,11 +2620,7 @@ install_command() {
     echo -e "${WHITE}⚙️  Creating Configuration Files${NC}"
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 40))${NC}"
 
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        create_nginx_config "$domain" "$port"
-    else
-        create_caddy_config "$domain" "$port"
-    fi
+    create_nginx_config "$domain" "$port"
     # Install random template instead of default HTML
     echo
     echo -e "${WHITE}🎨 Installing Template${NC}"
@@ -3008,7 +2675,7 @@ install_command() {
     cd "$APP_DIR"
     
     # Validate configuration based on web server type
-    if [ "$WEB_SERVER" = "nginx" ]; then
+    if true; then
         # Check SSL certificates exist
         if [ ! -f "$APP_DIR/ssl/fullchain.crt" ] || [ ! -f "$APP_DIR/ssl/private.key" ]; then
             log_error "SSL certificates not found!"
@@ -3084,7 +2751,7 @@ install_command() {
     fi
 
     # Configure 3x-ui/Xray socket access if needed
-    if [ "$WEB_SERVER" = "nginx" ] && [ "$USE_SOCKET" = true ]; then
+    if [ "$USE_SOCKET" = true ]; then
         configure_3xui_socket
     fi
 
@@ -3098,7 +2765,7 @@ install_command() {
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Domain:" "$domain"
     
     # Show connection mode info for Nginx
-    if [ "$WEB_SERVER" = "nginx" ]; then
+    if true; then
         if [ "$USE_SOCKET" = true ]; then
             printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Connection Mode:" "Unix Socket"
             printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Socket Path:" "$SOCKET_PATH"
@@ -3118,7 +2785,7 @@ install_command() {
     echo -e "${WHITE}📋 Next Steps:${NC}"
     echo -e "${GRAY}   • Configure your Xray Reality with:${NC}"
     echo -e "${GRAY}     - serverNames: [\"$domain\"]${NC}"
-    if [ "$WEB_SERVER" = "nginx" ]; then
+    if true; then
         if [ "$USE_SOCKET" = true ]; then
             echo -e "${CYAN}     - target: \"$SOCKET_PATH\"${NC}"
         else
@@ -3165,65 +2832,6 @@ validate_nginx_config() {
     return 1
 }
 
-validate_caddyfile() {
-    echo -e "${BLUE}🔍 Validating Caddyfile...${NC}"
-
-    # Make the image available locally (with mirror fallback) so the validation
-    # `docker run` below reuses it instead of pulling from Docker Hub.
-    ensure_image "caddy:${CADDY_VERSION}" || true
-
-    # Загружаем переменные из .env файла для валидации
-    if [ -f "$APP_DIR/.env" ]; then
-        export $(grep -v '^#' "$APP_DIR/.env" | xargs)
-    fi
-    
-    # Проверяем, что обязательные переменные установлены
-    if [ -z "$SELF_STEAL_DOMAIN" ] || [ -z "$SELF_STEAL_PORT" ]; then
-        echo -e "${YELLOW}⚠️ Environment variables not set, using defaults for validation${NC}"
-        export SELF_STEAL_DOMAIN="example.com"
-        export SELF_STEAL_PORT="9443"
-    fi
-    
-    # Валидация с теми же volume что и в рабочем контейнере
-    local ssl_volume=""
-    if [ -d "$APP_DIR/ssl" ] && [ -f "$APP_DIR/ssl/fullchain.crt" ]; then
-        ssl_volume="-v $APP_DIR/ssl:/etc/caddy/ssl:ro"
-    fi
-
-    # Use the SAME image as the runtime container (docker-compose), not a
-    # separate "-alpine" tag — otherwise we pull a second image just to validate,
-    # doubling Docker Hub pulls and making rate-limit failures more likely.
-    local validate_output
-    if validate_output=$(docker run --rm \
-        -v "$APP_DIR/Caddyfile:/etc/caddy/Caddyfile:ro" \
-        -v "/etc/letsencrypt:/etc/letsencrypt:ro" \
-        -v "$APP_DIR/html:/var/www/html:ro" \
-        $ssl_volume \
-        -e "SELF_STEAL_DOMAIN=$SELF_STEAL_DOMAIN" \
-        -e "SELF_STEAL_PORT=$SELF_STEAL_PORT" \
-        caddy:${CADDY_VERSION} \
-        caddy validate --config /etc/caddy/Caddyfile 2>&1); then
-        echo -e "${GREEN}✅ Caddyfile is valid${NC}"
-        return 0
-    fi
-
-    # A failed `docker run` (Docker Hub rate limit, no network, missing image,
-    # daemon down) is NOT a Caddyfile error — don't mislabel it as invalid config.
-    if echo "$validate_output" | grep -qiE 'pull rate limit|unauthenticated pull|toomanyrequests|error from registry|manifest unknown|manifest for .* not found|not found: manifest|no such host|connection refused|i/o timeout|timeout exceeded|cannot connect to the docker daemon|denied'; then
-        echo -e "${YELLOW}⚠️  Could not validate: Docker failed to pull image caddy:${CADDY_VERSION}${NC}"
-        echo -e "${GRAY}   This is NOT a Caddyfile syntax error.${NC}"
-        echo -e "${GRAY}   Most likely a Docker Hub pull rate limit. Options:${NC}"
-        echo -e "${GRAY}     • docker login                # raises the pull limit${NC}"
-        echo -e "${GRAY}     • docker pull caddy:${CADDY_VERSION}   # warm the cache / retry${NC}"
-        echo -e "${GRAY}     • or wait for the limit to reset (~6h)${NC}"
-        return 2
-    fi
-
-    echo -e "${RED}❌ Invalid Caddyfile configuration${NC}"
-    echo "$validate_output" | tail -20
-    echo -e "${YELLOW}💡 Check syntax: $APP_NAME edit${NC}"
-    return 1
-}
 
 show_current_template_info() {
     echo -e "${WHITE}📄 Current Template Information${NC}"
@@ -3816,11 +3424,7 @@ maybe_restart_webserver() {
     running_services=$(cd "$APP_DIR" && docker compose ps -q 2>/dev/null | wc -l || echo "0")
     
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
     
     if [ "$running_services" -gt 0 ]; then
         read -p "Restart $server_name to apply changes? [Y/n]: " -r restart_server
@@ -3847,11 +3451,7 @@ template_command() {
     fi
 
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
 
     local running_services
     running_services=$(cd "$APP_DIR" && docker compose ps -q 2>/dev/null | wc -l || echo "0")
@@ -3968,11 +3568,7 @@ up_command() {
     fi
     
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
     
     log_info "Starting $server_name Services"
     cd "$APP_DIR" || return 1
@@ -3995,11 +3591,7 @@ down_command() {
     fi
     
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
     
     log_info "Stopping $server_name Services"
     cd "$APP_DIR" || return 1
@@ -4016,7 +3608,7 @@ restart_command() {
     check_running_as_root
     
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
+    if true; then
         server_name="Nginx"
         read -p "Validate Nginx config before restart? [Y/n]: " -r validate_choice
         if [[ ! $validate_choice =~ ^[Nn]$ ]]; then
@@ -4050,16 +3642,12 @@ restart_command() {
 
 status_command() {
     if [ ! -d "$APP_DIR" ]; then
-        log_error "$WEB_SERVER not installed"
+        log_error "Nginx not installed"
         return 1
     fi
 
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
 
     echo -e "${WHITE}📊 $server_name Service Status${NC}"
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 30))${NC}"
@@ -4133,7 +3721,7 @@ status_command() {
     printf "   ${WHITE}%-15s${NC} ${GRAY}%s${NC}\n" "Domain:" "${domain:-N/A}"
     
     # Show connection mode for Nginx
-    if [ "$WEB_SERVER" = "nginx" ]; then
+    if true; then
         if [ "$connection_mode" = "socket" ] || [ -z "$connection_mode" ]; then
             printf "   ${WHITE}%-15s${NC} ${GRAY}%s${NC}\n" "Connection:" "Unix Socket"
             printf "   ${WHITE}%-15s${NC} ${CYAN}%s${NC}\n" "Xray target:" "$SOCKET_PATH"
@@ -4156,16 +3744,12 @@ status_command() {
 
 logs_command() {
     if [ ! -f "$APP_DIR/docker-compose.yml" ]; then
-        log_error "$WEB_SERVER is not installed"
+        log_error "Nginx is not installed"
         return 1
     fi
     
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
     
     echo -e "${WHITE}📝 $server_name Logs${NC}"
     echo -e "${GRAY}Press Ctrl+C to exit${NC}"
@@ -4182,7 +3766,7 @@ renew_ssl_command() {
     check_running_as_root
     
     if [ ! -d "$APP_DIR" ]; then
-        log_error "$WEB_SERVER is not installed"
+        log_error "Nginx is not installed"
         return 1
     fi
     
@@ -4364,16 +3948,12 @@ clean_logs_command() {
     check_running_as_root
     
     if [ ! -d "$APP_DIR" ]; then
-        log_error "$WEB_SERVER is not installed"
+        log_error "Nginx is not installed"
         return 1
     fi
     
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
     
     echo -e "${WHITE}🧹 Cleaning $server_name Logs${NC}"
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 25))${NC}"
@@ -4431,16 +4011,12 @@ logs_size_command() {
     check_running_as_root
     
     if [ ! -d "$APP_DIR" ]; then
-        log_error "$WEB_SERVER is not installed"
+        log_error "Nginx is not installed"
         return 1
     fi
     
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
     
     echo -e "${WHITE}📊 $server_name Log Sizes${NC}"
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 25))${NC}"
@@ -4493,11 +4069,7 @@ uninstall_command() {
     check_running_as_root
     
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
     
     echo -e "${WHITE}🗑️  $server_name Uninstallation${NC}"
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 30))${NC}"
@@ -4536,16 +4108,12 @@ edit_command() {
     check_running_as_root
     
     if [ ! -d "$APP_DIR" ]; then
-        log_error "$WEB_SERVER is not installed"
+        log_error "Nginx is not installed"
         return 1
     fi
     
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
     
     echo -e "${WHITE}📝 Edit $server_name Configuration Files${NC}"
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 30))${NC}"
@@ -4553,7 +4121,7 @@ edit_command() {
     
     echo -e "${WHITE}Select file to edit:${NC}"
     echo -e "   ${WHITE}1)${NC} ${GRAY}.env file (domain and port settings)${NC}"
-    if [ "$WEB_SERVER" = "nginx" ]; then
+    if true; then
         echo -e "   ${WHITE}2)${NC} ${GRAY}nginx.conf (main Nginx configuration)${NC}"
         echo -e "   ${WHITE}3)${NC} ${GRAY}selfsteal.conf (site configuration)${NC}"
         echo -e "   ${WHITE}4)${NC} ${GRAY}docker-compose.yml (Docker configuration)${NC}"
@@ -4564,7 +4132,7 @@ edit_command() {
     echo -e "   ${WHITE}0)${NC} ${GRAY}Cancel${NC}"
     echo
     
-    if [ "$WEB_SERVER" = "nginx" ]; then
+    if true; then
         read -p "Select option [0-4]: " choice
         
         case "$choice" in
@@ -4634,11 +4202,7 @@ edit_command() {
 
 show_help() {
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
     
     echo -e "${WHITE}$server_name for Reality Selfsteal Management Script v$SCRIPT_VERSION${NC}"
     echo
@@ -4647,8 +4211,7 @@ show_help() {
     echo
     echo -e "${WHITE}Server Options:${NC}"
     printf "   ${CYAN}%-22s${NC} %s\n" "--nginx" "Use Nginx as web server"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--caddy" "Use Caddy as web server (default)"
-    echo
+        echo
     echo -e "${WHITE}Caddy Options:${NC}"
     printf "   ${CYAN}%-22s${NC} %s\n" "--h3, --quic" "Enable HTTP/3 (QUIC) — OFF by default"
     printf "   ${CYAN}%-22s${NC} %s\n" "--no-randomize" "Don't mutate templates on install"
@@ -4850,6 +4413,35 @@ guide_command() {
     echo -e "${WHITE}📖 Selfsteal Setup Guide${NC}"
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 50))${NC}"
     echo
+    # Mandatory 3x-ui Docker Installation
+    log_info "Installing 3x-ui Panel (Docker)..."
+    local XUI_DIR="/opt/3x-ui"
+    create_dir_safe "$XUI_DIR"
+    
+    cat > "$XUI_DIR/docker-compose.yml" << 'EOF'
+services:
+  3xui:
+    image: ghcr.io/mhsanaei/3x-ui:latest
+    container_name: 3xui_app
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./db/:/etc/x-ui/
+      - ./cert/:/root/cert/
+      - /dev/shm:/dev/shm
+    environment:
+      XRAY_VMESS_AEAD_FORCED: "false"
+      XUI_ENABLE_FAIL2BAN: "true"
+    ports:
+      - "2053:2053"
+    restart: unless-stopped
+EOF
+    log_info "Starting 3x-ui container on port 2053..."
+    cd "$XUI_DIR" && docker compose up -d
+    cd - >/dev/null
+    log_success "3x-ui installed and started. Access it at port 2053."
+    
 
     # Get current configuration
     local domain=""
@@ -4865,7 +4457,7 @@ guide_command() {
     
     # Determine xray_target based on web server and connection mode
     local xver_value=0
-    if [ "$WEB_SERVER" = "nginx" ]; then
+    if true; then
         xver_value=1
         if [ "$connection_mode" = "socket" ] || [ -z "$connection_mode" ]; then
             xray_target="$SOCKET_PATH"
@@ -4878,11 +4470,7 @@ guide_command() {
     fi
 
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
 
     echo -e "${BLUE}🎯 What is Selfsteal?${NC}"
     echo -e "${GRAY}Selfsteal is a $server_name-based front-end for Xray Reality protocol that provides:"
@@ -4893,7 +4481,7 @@ guide_command() {
     echo
 
     echo -e "${BLUE}🔧 How it works:${NC}"
-    if [ "$WEB_SERVER" = "nginx" ]; then
+    if true; then
         if [ "$connection_mode" != "tcp" ]; then
             echo -e "${GRAY}1. Nginx listens on Unix Socket ($SOCKET_PATH)"
         else
@@ -5003,7 +4591,7 @@ guide_command() {
     echo
     
     echo -e "${CYAN}📌 Important parameters:${NC}"
-    if [ "$WEB_SERVER" = "nginx" ]; then
+    if true; then
         echo -e "${WHITE}   xver: 1${NC} - proxy_protocol version (Nginx requires xver: 1)"
     else
         echo -e "${WHITE}   xver: 0${NC} - no proxy_protocol (Caddy requires xver: 0)"
@@ -5069,11 +4657,7 @@ main_menu() {
     check_for_updates_silent
     
     local server_name
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        server_name="Nginx"
-    else
-        server_name="Caddy"
-    fi
+    server_name="Nginx"
     
     while true; do
         clear
@@ -5183,7 +4767,7 @@ main_menu() {
         echo -e "   ${WHITE}11)${NC} ✏️  Edit configuration"
         
         # Show SSL renewal option only for Nginx
-        if [ "$WEB_SERVER" = "nginx" ]; then
+        if true; then
             echo -e "   ${WHITE}12)${NC} 🔐 Renew SSL certificate"
         fi
         echo
@@ -5224,7 +4808,7 @@ main_menu() {
             10) clean_logs_command; read -p "Press Enter to continue..." ;;
             11) edit_command; read -p "Press Enter to continue..." ;;
             12) 
-                if [ "$WEB_SERVER" = "nginx" ]; then
+                if true; then
                     renew_ssl_command
                 else
                     echo -e "${YELLOW}ℹ️  SSL renewal is only available for Nginx installations${NC}"
@@ -5283,3 +4867,4 @@ case "$COMMAND" in
         exit 1
         ;;
 esac
+
