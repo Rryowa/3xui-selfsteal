@@ -2441,6 +2441,9 @@ install_command() {
         return 1
     fi
 
+    # Install 3x-ui Panel in Docker by default
+    install_3xui_docker
+
     # Collect configuration
     echo -e "${WHITE}📝 Configuration Setup${NC}"
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 30))${NC}"
@@ -4625,8 +4628,50 @@ install_3xui_docker() {
     local XUI_DIR="/opt/3x-ui"
     create_dir_safe "$XUI_DIR"
     
-    log_info "Creating docker-compose.yml for 3x-ui..."
-    cat > "$XUI_DIR/docker-compose.yml" << 'EOF'
+    # Check for a cloned 3x-ui repository in common locations
+    local SCRIPT_DIR
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    local source_repo=""
+    for loc in "$SCRIPT_DIR/3x-ui" "$SCRIPT_DIR/../3x-ui" "$(pwd)/3x-ui" "/root/3x-ui"; do
+        if [ -d "$loc" ] && [ -f "$loc/Dockerfile" ]; then
+            source_repo="$loc"
+            break
+        fi
+    done
+    
+    if [ -n "$source_repo" ]; then
+        log_info "Found cloned 3x-ui repository at: $source_repo"
+        log_info "Copying source files to $XUI_DIR/src..."
+        rm -rf "$XUI_DIR/src"
+        mkdir -p "$XUI_DIR/src"
+        cp -r "$source_repo/." "$XUI_DIR/src/"
+        
+        # Create docker-compose.yml to build from source
+        cat > "$XUI_DIR/docker-compose.yml" << 'EOF'
+services:
+  3xui:
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+    container_name: 3xui_app
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./db/:/etc/x-ui/
+      - ./cert/:/root/cert/
+      - /dev/shm:/dev/shm
+    environment:
+      XRAY_VMESS_AEAD_FORCED: "false"
+      XUI_ENABLE_FAIL2BAN: "true"
+    network_mode: "host"
+    restart: unless-stopped
+EOF
+    else
+        log_info "Cloned 3x-ui repository not found. Falling back to official ghcr.io image..."
+        # Create docker-compose.yml to pull pre-built image
+        cat > "$XUI_DIR/docker-compose.yml" << 'EOF'
 services:
   3xui:
     image: ghcr.io/mhsanaei/3x-ui:latest
@@ -4644,6 +4689,7 @@ services:
     network_mode: "host"
     restart: unless-stopped
 EOF
+    fi
     
     log_info "Starting 3x-ui container..."
     cd "$XUI_DIR"
