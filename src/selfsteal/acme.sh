@@ -27,6 +27,15 @@ install_acme() {
     # Check if already installed
     if [ -f "$ACME_HOME/acme.sh" ]; then
         log_success "acme.sh is already installed"
+        
+        # Fix stale account email if necessary
+        local random_email="user$(shuf -i 10000-99999 -n 1)@gmail.com"
+        if grep -q "debian.debian" "$ACME_HOME/account.conf" 2>/dev/null || grep -q "debian.debian" "$ACME_HOME/ca/acme-v02.api.letsencrypt.org/directory/ca.conf" 2>/dev/null; then
+            sed -i "s/.*@debian.debian/$random_email/g" "$ACME_HOME/account.conf" 2>/dev/null || true
+            sed -i "s/.*@debian.debian/$random_email/g" "$ACME_HOME/ca/acme-v02.api.letsencrypt.org/directory/ca.conf" 2>/dev/null || true
+            "$ACME_HOME/acme.sh" --register-account --server letsencrypt >/dev/null 2>&1 || true
+        fi
+        
         "$ACME_HOME/acme.sh" --set-default-ca --server letsencrypt >/dev/null 2>&1 || true
         set -e
         set -o pipefail 2>/dev/null || true
@@ -357,6 +366,14 @@ issue_ssl_certificate() {
         
         # Setup iptables redirect: Let's Encrypt connects to 443, redirect to acme_port
         setup_acme_port_redirect "$try_port"
+        
+        # Temporarily stop caddy-3xui if it's running, as it blocks port 443 and 80
+        local stopped_caddy=false
+        if docker ps -q -f "name=caddy-3xui" 2>/dev/null | grep -q .; then
+            log_info "Temporarily stopping caddy-3xui to free ports for ACME challenge..."
+            docker stop caddy-3xui >/dev/null 2>&1
+            stopped_caddy=true
+        fi
         
         local try_output
         local try_exit_code
