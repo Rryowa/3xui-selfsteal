@@ -288,10 +288,16 @@ if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^3xui_app$'; then
     docker rm -fv 3xui_app >/dev/null 2>&1 || true
 fi
 
+# Stop and remove existing caddy-3xui container to avoid port conflicts during reinstall
+if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^caddy-3xui$'; then
+    colorized_echo blue "Stopping and removing existing caddy-3xui container..."
+    docker rm -fv caddy-3xui >/dev/null 2>&1 || true
+fi
+
 # Clean up previous data directory except certificates
 if [ -d "/opt/3x-ui" ]; then
-    colorized_echo blue "Removing previous database and backup assets (preserving certificates)..."
-    rm -rf /opt/3x-ui/db /opt/3x-ui/backups /opt/3x-ui/docker-compose.yml
+    colorized_echo blue "Removing previous database, Caddy config, and backup assets (preserving certificates)..."
+    rm -rf /opt/3x-ui/db /opt/3x-ui/backups /opt/3x-ui/docker-compose.yml /opt/3x-ui/caddy
 fi
 
 check_ports
