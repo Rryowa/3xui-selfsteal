@@ -303,7 +303,7 @@ install_acme() {
     [ "$DEBUG_MODE" = true ] && echo "DEBUG: acme.sh not found at $ACME_HOME/acme.sh"
     
     # Generate random email for registration
-    local random_email="user$(shuf -i 10000-99999 -n 1)@$(hostname -f 2>/dev/null || echo 'localhost.local')"
+    local random_email="user$(shuf -i 10000-99999 -n 1)@gmail.com"
     
     echo -e "${GRAY}   Email: $random_email${NC}"
     echo -e "${GRAY}   Downloading and installing acme.sh...${NC}"
@@ -612,6 +612,7 @@ issue_ssl_certificate() {
             --fullchain-file "$try_ssl_dir/fullchain.crt"
             --alpn
             --tlsport "$try_port"
+            --httpport 65535
             --server letsencrypt
             --force
             --debug 2
