@@ -211,6 +211,17 @@ Key features: one-liner install, SSH access between peers (`--ssh`), auto-firewa
 2. Follow existing code style, test on multiple distros
 3. Check [existing issues](https://github.com/DigneZzZ/remnawave-scripts/issues) before reporting bugs
 
+### Building the Selfsteal Script
+
+The `selfsteal.sh` script is built from modular components located in the `src/` directory. If you are developing and modifying the `selfsteal` script:
+
+1. Edit the relevant files in `src/` (e.g., `src/selfsteal/main.sh`, `src/selfsteal/acme.sh`).
+2. Run the build script to compile them:
+   ```bash
+   bash build.sh src/selfsteal/main.sh > dist/selfsteal.sh
+   ```
+3. Test your changes by running the compiled script.
+
 
 ---
 
