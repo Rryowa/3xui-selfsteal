@@ -92,6 +92,24 @@ validate_dns() {
     return 0
 }
 
+wait_for_db_initialization() {
+    local db_file="/opt/3x-ui/db/x-ui.db"
+    colorized_echo blue "Waiting for 3x-ui database to initialize..."
+    local timeout=15
+    local elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+        if [ -f "$db_file" ]; then
+            if sqlite3 "$db_file" "SELECT name FROM sqlite_master WHERE type='table' AND name='settings';" 2>/dev/null | grep -q "settings"; then
+                return 0
+            fi
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    colorized_echo red "Timeout waiting for database initialization."
+    return 1
+}
+
 setup_caddy_reverse_proxy() {
     local server_ip="$1"
     local panel_port="$2"
@@ -124,6 +142,11 @@ setup_caddy_reverse_proxy() {
     
     if ! validate_dns "$panel_domain" "$server_ip"; then
         colorized_echo yellow "Skipping Caddy configuration due to DNS validation failure."
+        return 0
+    fi
+    
+    if ! wait_for_db_initialization; then
+        colorized_echo red "Skipping Caddy configuration because the database could not be initialized."
         return 0
     fi
     
@@ -315,7 +338,7 @@ fi
 cat << 'DOCKER' > /opt/3x-ui/docker-compose.yml
 services:
   3xui:
-    image: ghcr.io/mhsanaei/3x-ui:latest
+    image: ghcr.io/mhsanaei/3x-ui:v2.9.4
     container_name: 3xui_app
     network_mode: host
     restart: unless-stopped
