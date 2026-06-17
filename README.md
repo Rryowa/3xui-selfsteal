@@ -16,11 +16,40 @@ bash 3x-ui-docker.sh
 - **UNIX Socket Configuration** — mounts `/dev/shm` to share Unix sockets with Nginx Selfsteal container for stealthy proxying.
 - **Port Conflict Checks** — verifies port availability (`80`, `443`, `2053`) before launching container.
 
+## ⚙️ Architecture & Mechanics
+
+This project deploys a secure, stealthy proxy setup utilizing **Nginx** to handle both the decoy template website (for Reality masking) and the secure reverse proxy for the 3x-ui management panel:
+
+```mermaid
+graph TD
+    User([VPN Client]) -->|Port 443 TCP/TLS| Xray[Xray Core / 3x-ui Inbound]
+    
+    subgraph Reality Masking (Stealth)
+        Xray -->|Direct scans / unrecognized traffic| UnixSock[Unix Socket: /dev/shm/nginx.sock]
+        UnixSock --> Nginx[Nginx Server]
+        Nginx -->|Serves AI-decoy| DecoyHTML[(Randomized Template Site)]
+    end
+
+    subgraph Panel Management (Security)
+        Admin([Admin Browser]) -->|panel.example.com / Port 8443 HTTPS| Nginx
+        Nginx -->|Local Proxy| PanelDB[3x-ui Panel / Local Port 2053]
+    end
+```
+
+### 1. Panel Reverse Proxy (Nginx)
+* **Goal**: Secure and restrict access to the 3x-ui management panel.
+* **How it works**: The Nginx selfsteal installer binds the 3x-ui panel exclusively to the local loopback interface (`webListen = 127.0.0.1`), completely hiding port `2053` from the public internet. Nginx listens on port `8443` for your configured domain (`panel.yourdomain.com`), uses the same auto-renewed Let's Encrypt certificate as your decoy site, and reverse proxies authenticated admin traffic to the panel locally.
+
+### 2. Reality Camouflage (Nginx Selfsteal)
+* **Goal**: Provide standard HTTPS decoy responses to active censorship probes (TSPU/RKN).
+* **How it works**: Xray binds to public port `443`. When normal users connect with valid Reality keys, they are proxied to the internet. When deep packet inspection (DPI) scanners probe the IP, Xray intercepts the handshake and redirects the traffic internally via `/dev/shm/nginx.sock` (Unix socket) or TCP port `47443` to Nginx. Nginx then serves a customized, AI-generated decoy website template, making your server appear like a legitimate web resource.
+* **Why Nginx?**: Nginx uses OpenSSL, generating standard browser-compliant TLS signatures that make active probing completely silent.
+
 ---
 
-## 🎭 Caddy Selfsteal (Reality Masking)
+## 🎭 Nginx Selfsteal (Reality Masking)
 
-Deploy Caddy as a **Reality traffic masking** solution with professional website templates for HTTPS camouflage.
+Deploy Nginx as a **Reality traffic masking** solution with professional website templates for HTTPS camouflage.
 
 ### Installation
 
@@ -46,7 +75,7 @@ Or run the compiled script directly:
 | `up` / `down` / `restart` | Service lifecycle |
 | `status` / `logs` | Status & logs |
 | `template` | Manage website templates |
-| `edit` | Edit Caddyfile |
+| `edit` | Edit nginx.conf |
 | `guide` | Reality integration guide |
 | `update` | Update script |
 
@@ -59,11 +88,11 @@ selfsteal template list              # List templates
 selfsteal template install converter # Install template
 ```
 
-> 🛡️ **v2.8.0:** every template is uniquified per install (no byte-identical fingerprint) and provenance leaks are stripped. HTTP/3 is **off by default** — enable with `--h3`; disable mutation with `--no-randomize`. Use `--test` or `--staging` to run with Let's Encrypt staging environment.
+> 🛡️ **v2.8.0:** every template is uniquified per install (no byte-identical fingerprint) and provenance leaks are stripped. Mutation is enabled by default — disable with `--no-randomize`. Use `--test` or `--staging` to run with Let's Encrypt staging environment.
 
 **Xray Reality config:**
 ```json
-{ "realitySettings": { "dest": "127.0.0.1:9443", "serverNames": ["your-domain.com"] } }
+{ "realitySettings": { "dest": "127.0.0.1:47443", "serverNames": ["your-domain.com"] } }
 ```
 
 <details>
@@ -95,7 +124,7 @@ docker stats       # Resource usage
 | Component | Path |
 |-----------|------|
 | 3x-ui Panel | `/opt/3x-ui/backups/` |
-| Caddy / Nginx | `/opt/caddy/logs/` or `/opt/nginx-selfsteal/logs/` |
+| Nginx (Panel/Decoy) | `/opt/nginx-selfsteal/logs/` |
 
 Log rotation: 50MB max, 5 files kept, compressed automatically.
 
@@ -151,7 +180,7 @@ For advanced details on Deep Packet Inspection (DPI) evasion, the "Siberian Bloc
 - **Безопаснее**: Не занимает сетевой порт
 - **Проще**: Нет конфликтов портов
 
-> 🛡️ **Устойчивость к активному пробингу (РКН/ТСПУ).** При активной пробе Reality форвардит соединение на dest, и пробер завершает реальное TLS-рукопожатие напрямую с веб-сервером. Caddy использует Go `crypto/tls` с узнаваемым отпечатком (JARM/JA3S и HTTP/2 SETTINGS), который **нельзя изменить средствами Caddy**. Nginx (OpenSSL) выглядит как обычный сайт. Поэтому при жёстком пробинге **Nginx как dest объективно «тише»** — если бан повторяется даже после отключения h3, переходите на `--nginx`. Также в острые периоды помогает увод Reality с порта 443 на высокий порт (47000+).
+> 🛡️ **Устойчивость к активному пробингу (РКН/ТСПУ).** При активной пробе Reality форвардит соединение на dest, и пробер завершает реальное TLS-рукопожатие напрямую с веб-сервером. Nginx (OpenSSL) выглядит как обычный сайт, поэтому в `selfsteal.sh` используется Nginx. При жёстком пробинге **Nginx как dest объективно «тише»**. Также в острые периоды помогает увод Reality с порта 443 на высокий порт (47000+).
 
 ### Шаблоны сайтов
 
@@ -183,7 +212,7 @@ For advanced details on Deep Packet Inspection (DPI) evasion, the "Siberian Bloc
 | *(по умолчанию)* | Мутация включена — рекомендуется |
 | `--no-randomize` | Отключить мутацию (ставить шаблон «как есть», для отладки/репро) |
 
-> ⚠️ **Ограничение:** контент, подгружаемый с иностранных CDN (giphy/unsplash/pexels), вшит в минифицированный бандл — убрать его нельзя без поломки страницы. Самые «тихие» шаблоны — самодостаточные (например, `Convertit`). Мутация ломает совпадение по хешу/заголовкам, но не меняет TLS-отпечаток веб-сервера (см. caveat в разделе «Сравнение Caddy vs Nginx»).
+> ⚠️ **Ограничение:** контент, подгружаемый с иностранных CDN (giphy/unsplash/pexels), вшит в минифицированный бандл — убрать его нельзя без поломки страницы. Самые «тихие» шаблоны — самодостаточные (например, `Convertit`). Мутация ломает совпадение по хешу/заголовкам, но не меняет TLS-отпечаток веб-сервера.
 
 #### 📦 Источник шаблонов
 
@@ -233,7 +262,7 @@ For advanced details on Deep Packet Inspection (DPI) evasion, the "Siberian Bloc
 
 | Параметр | Описание |
 |----------|----------|
-| `target` | `/dev/shm/nginx.sock` (Nginx socket) или `127.0.0.1:9443` (TCP) |
+| `target` | `/dev/shm/nginx.sock` (Nginx socket) or `127.0.0.1:47443` (TCP) |
 | `xver` | Всегда `1` для proxy_protocol v1 |
 | `serverNames` | Ваш домен, указанный при установке |
 | `privateKey` | Ваш сгенерированный приватный ключ Reality |

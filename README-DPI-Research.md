@@ -7,13 +7,13 @@ This document aggregates all researched information, architectural blueprints, t
 ## 1. Project Overview & Architecture
 The repository [3xui-selfsteal](file:///root/3xui-selfsteal) is a deployment suite designed to spin up Docker-based VPN and proxy infrastructure. It consists of three primary modules:
 1.  **3x-ui Docker Panel ([3x-ui-docker.sh](file:///root/3xui-selfsteal/3x-ui-docker.sh)):** A containerized web interface used to manage Xray inbounds (VLESS, VMess, Trojan, Shadowsocks) and dynamically generate configurations.
-2.  **Caddy Selfsteal ([selfsteal.sh](file:///root/3xui-selfsteal/selfsteal.sh)):** Deploys a Caddy web server with professional decoy website templates (mimicking YouTube, speedtests, mod managers) to act as an HTTPS camouflage (decoy destination) on port `9443` for Xray's Reality protocol.
+2.  **Nginx Selfsteal ([selfsteal.sh](file:///root/3xui-selfsteal/selfsteal.sh)):** Deploys an Nginx web server with professional decoy website templates (mimicking YouTube, speedtests, mod managers) to act as an HTTPS camouflage (decoy destination) on port `47443` or via Unix socket for Xray's Reality protocol.
 3.  **NetBird VPN ([netbird.sh](file:///root/3xui-selfsteal/netbird.sh)):** Installs a WireGuard-based mesh VPN to securely connect multiple VPS instances or nodes.
-
+ 
 ### Networking Implementation:
-*   Both the 3x-ui and Caddy Selfsteal containers run with `network_mode: "host"`.
+*   Both the 3x-ui and Nginx Selfsteal containers run with `network_mode: "host"`.
 *   This bypasses Docker's internal virtual network bridge (`docker0`), allowing both containers to share the host's loopback and network interface.
-*   **The Reality Decoy Mechanism:** Xray binds to public port `443`. Legitimate VPN clients present the correct cryptographic key and connect. Active probes, firewalls, or regular internet traffic presenting an incorrect key are silently forwarded internally to `127.0.0.1:9443`, where Caddy serves the decoy site, effectively masking the proxy server.
+*   **The Reality Decoy Mechanism:** Xray binds to public port `443`. Legitimate VPN clients present the correct cryptographic key and connect. Active probes, firewalls, or regular internet traffic presenting an incorrect key are silently forwarded internally to `127.0.0.1:47443` (or via Unix socket at `/dev/shm/nginx.sock`), where Nginx serves the decoy site, effectively masking the proxy server.
 
 ---
 

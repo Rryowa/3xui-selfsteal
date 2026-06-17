@@ -28,22 +28,6 @@ validate_domain() {
     return 0
 }
 
-check_caddy_ports() {
-    local ports=(80 443)
-    local conflict=false
-    for port in "${ports[@]}"; do
-        if ss -tuln | grep -q ":$port "; then
-            colorized_echo red "Port $port is already in use."
-            conflict=true
-        fi
-    done
-    if [ "$conflict" = true ]; then
-        colorized_echo red "Caddy requires ports 80 and 443 to be free for SSL certificates."
-        return 1
-    fi
-    return 0
-}
-
 ensure_sqlite3_installed() {
     if ! command -v sqlite3 >/dev/null 2>&1; then
         colorized_echo blue "Installing sqlite3 to manage panel settings database..."
@@ -110,125 +94,6 @@ wait_for_db_initialization() {
     return 1
 }
 
-setup_caddy_reverse_proxy() {
-    local server_ip="$1"
-    local panel_port="$2"
-    
-    echo
-    read -p "Do you want to configure a secure Caddy reverse proxy with SSL? (y/n): " -r setup_caddy
-    if [[ ! "$setup_caddy" =~ ^[Yy]$ ]]; then
-        return 0
-    fi
-    
-    if ! check_caddy_ports; then
-        colorized_echo red "Aborting Caddy setup due to port conflicts."
-        return 0
-    fi
-    
-    ensure_sqlite3_installed
-    
-    local panel_domain=""
-    while true; do
-        read -p "Enter the panel domain (e.g., panel.example.com): " -r input_domain
-        panel_domain=$(echo "$input_domain" | sed -e 's|^https\?://||' -e 's|/$||' | xargs)
-        if [ -z "$panel_domain" ]; then
-            colorized_echo red "Domain cannot be empty."
-        elif ! validate_domain "$panel_domain"; then
-            colorized_echo red "Invalid domain format. Try again."
-        else
-            break
-        fi
-    done
-    
-    if ! validate_dns "$panel_domain" "$server_ip"; then
-        colorized_echo yellow "Skipping Caddy configuration due to DNS validation failure."
-        return 0
-    fi
-    
-    if ! wait_for_db_initialization; then
-        colorized_echo red "Skipping Caddy configuration because the database could not be initialized."
-        return 0
-    fi
-    
-    colorized_echo blue "Configuring 3x-ui to listen only on local loopback interface..."
-    sqlite3 /opt/3x-ui/db/x-ui.db "INSERT OR REPLACE INTO settings (key, value) VALUES ('webListen', '127.0.0.1');"
-    
-    colorized_echo blue "Creating Caddy configuration files..."
-    mkdir -p /opt/3x-ui/caddy
-    
-    # 1. Write .env
-    cat > /opt/3x-ui/caddy/.env << EOF
-PANEL_DOMAIN=$panel_domain
-PANEL_PORT=$panel_port
-EOF
-    
-    # 2. Write Caddyfile
-    cat > /opt/3x-ui/caddy/Caddyfile << 'EOF'
-{
-    servers {
-        protocols h1 h2 h3
-    }
-}
-
-https://{$PANEL_DOMAIN} {
-    encode zstd gzip
-
-    reverse_proxy 127.0.0.1:{$PANEL_PORT} {
-        header_up X-Real-IP {remote_host}
-        header_up Host {host}
-    }
-
-    log {
-        output file /var/log/caddy/panel.log {
-            roll_size 30mb
-            roll_keep 10
-            roll_keep_for 720h
-        }
-    }
-}
-
-:443 {
-    tls internal
-    respond 204
-}
-EOF
-
-    # 3. Write docker-compose.yml
-    cat > /opt/3x-ui/caddy/docker-compose.yml << 'EOF'
-services:
-  caddy:
-    image: caddy:2-alpine
-    container_name: caddy-3xui
-    hostname: caddy
-    restart: always
-    network_mode: host
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./logs:/var/log/caddy
-      - caddy-ssl-data:/data
-    env_file:
-      - .env
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-volumes:
-  caddy-ssl-data:
-    driver: local
-    external: false
-    name: caddy-ssl-data
-EOF
-
-    colorized_echo blue "Starting Caddy reverse proxy container..."
-    cd /opt/3x-ui/caddy
-    docker compose up -d
-    
-    # Export domain for connection details print
-    IS_HTTPS_SECURED=true
-    SECURED_DOMAIN="$panel_domain"
-}
 
 
 
@@ -311,11 +176,7 @@ if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^3xui_app$'; then
     docker rm -fv 3xui_app >/dev/null 2>&1 || true
 fi
 
-# Stop and remove existing caddy-3xui container to avoid port conflicts during reinstall
-if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^caddy-3xui$'; then
-    colorized_echo blue "Stopping and removing existing caddy-3xui container..."
-    docker rm -fv caddy-3xui >/dev/null 2>&1 || true
-fi
+
 
 # Clean up previous data directory except certificates
 if [ -d "/opt/3x-ui" ]; then
@@ -371,38 +232,18 @@ if command -v docker >/dev/null 2>&1; then
         fi
     fi
     
-    IS_HTTPS_SECURED=false
-    SECURED_DOMAIN=""
-    
-    # Setup Caddy reverse proxy
-    setup_caddy_reverse_proxy "$public_ip" "$panel_port"
-    
-    # If Caddy was configured, restart 3xui to apply the webListen binding
-    if [ "${IS_HTTPS_SECURED:-false}" = true ]; then
-        colorized_echo blue "Restarting 3x-ui panel to apply loopback binding..."
-        cd /opt/3x-ui
-        $COMPOSE restart
-    fi
-    
     colorized_echo green "✅ 3x-ui Docker started successfully!"
     echo
     
     colorized_echo green "────────────────────────────────────────"
     colorized_echo green "💻 Access Details for 3x-ui Panel:"
     colorized_echo green "────────────────────────────────────────"
-    if [ "${IS_HTTPS_SECURED:-false}" = true ]; then
-        colorized_echo green "🔗 URL:      https://${SECURED_DOMAIN}"
-    else
-        colorized_echo green "🔗 URL:      http://${public_ip}:${panel_port}"
-    fi
+    colorized_echo green "🔗 URL:      http://${public_ip}:${panel_port}"
     colorized_echo green "👤 Username: admin"
     colorized_echo green "🔑 Password: admin"
     colorized_echo green "────────────────────────────────────────"
-    if [ "${IS_HTTPS_SECURED:-false}" = true ]; then
-        colorized_echo blue "⚠️  IMPORTANT: Please change the default username and password immediately after your first login!"
-    else
-        colorized_echo blue "⚠️  IMPORTANT: Please change the default username, password, and port immediately after your first login!"
-    fi
+    colorized_echo blue "⚠️  IMPORTANT: Please change the default username, password, and port immediately after your first login!"
+    colorized_echo blue "ℹ️  NOTE: To secure your panel with HTTPS using Nginx selfsteal, run selfsteal.sh."
     echo
 else
     colorized_echo red "Docker not installed. Please install docker first."

@@ -71,6 +71,7 @@ FORCE_PORT=""
 FORCE_TEMPLATE=""
 PANEL_DOMAIN=""
 PANEL_PORT="8443"
+NO_PANEL=false
 
 # Staging mode for Let's Encrypt (uses staging API to bypass rate limits)
 USE_STAGING=false
@@ -105,7 +106,7 @@ HTML_DIR=""
 LOG_FILE="/var/log/selfsteal.log"
 
 # Default Settings
-DEFAULT_PORT="9443"
+DEFAULT_PORT="47443"
 
 # Template Registry (id:folder:emoji:name)
 declare -A TEMPLATE_FOLDERS=(
@@ -192,7 +193,6 @@ create_dir_safe() {
     fi
     return 0
 }
-
 # ============================================
 # Docker image acquisition (Docker Hub rate-limit / RU-block resilient)
 # ============================================
@@ -270,7 +270,6 @@ ensure_image() {
 ensure_runtime_image() {
     ensure_image "nginx:${NGINX_VERSION}"
 }
-
 # Check if acme.sh is installed
 check_acme_installed() {
     if [ -f "$ACME_HOME/acme.sh" ]; then
@@ -927,8 +926,6 @@ show_ssl_certificate_info() {
     
     echo
 }
-
-
 # Check if container has /dev/shm volume mounted
 check_container_shm_volume() {
     local container_name="$1"
@@ -1241,6 +1238,88 @@ configure_3xui_socket() {
     
     return 0
 }
+# Helper to configure the panel proxy
+configure_panel_proxy() {
+    local domain="$1"
+    local panel_port="$2"
+    
+    [ "$DEBUG_MODE" = true ] && echo "DEBUG: configure_panel_proxy started, domain=$domain, panel_port=$panel_port"
+    
+    local db_file="/opt/3x-ui/db/x-ui.db"
+    if [ -f "$db_file" ]; then
+        if command -v sqlite3 >/dev/null 2>&1; then
+            # Bind 3x-ui to 127.0.0.1
+            log_info "Configuring 3x-ui database to listen only on loopback interface (127.0.0.1)..."
+            sqlite3 "$db_file" "INSERT OR REPLACE INTO settings (key, value) VALUES ('webListen', '127.0.0.1');"
+            
+            # Restart 3x-ui container to apply change
+            if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^3xui_app$'; then
+                log_info "Restarting 3xui_app container to apply loopback binding..."
+                docker restart 3xui_app >/dev/null 2>&1 || true
+            fi
+            log_success "3x-ui loopback binding configured"
+        else
+            log_warning "sqlite3 command not found. Please install sqlite3 to secure the 3x-ui panel listener."
+        fi
+    else
+        log_warning "3x-ui database not found at $db_file. Skipping database loopback configuration."
+    fi
+}
+
+# Helper to remove the panel proxy Nginx config and restore 3x-ui bindings
+remove_panel_proxy() {
+    log_info "Removing panel proxy configuration..."
+    
+    # Remove Nginx panel config
+    if [ -f "$APP_DIR/conf.d/panel.conf" ]; then
+        rm -f "$APP_DIR/conf.d/panel.conf"
+        log_success "Removed Nginx panel config"
+        
+        # Reload Nginx if container is running
+        if docker ps -q -f "name=$CONTAINER_NAME" 2>/dev/null | grep -q .; then
+            log_info "Reloading Nginx to apply changes..."
+            docker exec "$CONTAINER_NAME" nginx -s reload >/dev/null 2>&1 || true
+        fi
+    fi
+    
+    # Restore 3x-ui binding to public
+    local db_file="/opt/3x-ui/db/x-ui.db"
+    if [ -f "$db_file" ] && command -v sqlite3 >/dev/null 2>&1; then
+        log_info "Restoring 3x-ui database listener to public (0.0.0.0)..."
+        sqlite3 "$db_file" "INSERT OR REPLACE INTO settings (key, value) VALUES ('webListen', '0.0.0.0');"
+        
+        # Restart 3x-ui container
+        if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^3xui_app$'; then
+            log_info "Restarting 3xui_app container to apply binding..."
+            docker restart 3xui_app >/dev/null 2>&1 || true
+        fi
+        log_success "3x-ui public binding restored"
+    fi
+}
+
+# Show status of panel proxy
+show_panel_status() {
+    local domain="$1"
+    local panel_port="$2"
+    
+    if [ -f "$APP_DIR/conf.d/panel.conf" ]; then
+        echo -e "   ${WHITE}Panel Proxy:${NC}       ${GREEN}Enabled${NC}"
+        echo -e "   ${WHITE}Panel URL:${NC}         ${BLUE}https://${domain}:${panel_port}${NC}"
+        
+        local db_file="/opt/3x-ui/db/x-ui.db"
+        if [ -f "$db_file" ] && command -v sqlite3 >/dev/null 2>&1; then
+            local web_listen
+            web_listen=$(sqlite3 "$db_file" "SELECT value FROM settings WHERE key='webListen';" 2>/dev/null || true)
+            if [ "$web_listen" = "127.0.0.1" ]; then
+                echo -e "   ${WHITE}3x-ui Bind:${NC}        ${GREEN}Secure (127.0.0.1 only)${NC}"
+            else
+                echo -e "   ${WHITE}3x-ui Bind:${NC}        ${YELLOW}⚠️  Public ($web_listen)${NC}"
+            fi
+        fi
+    else
+        echo -e "   ${WHITE}Panel Proxy:${NC}       ${GRAY}Disabled (HTTP direct or not configured)${NC}"
+    fi
+}
 
 
 # Check if port is open in firewall
@@ -1307,7 +1386,7 @@ show_help() {
     echo -e "${WHITE}Force Install Options:${NC}"
     printf "   ${CYAN}%-22s${NC} %s\n" "--force, -f" "Skip DNS validation and prompts"
     printf "   ${CYAN}%-22s${NC} %s\n" "--domain <domain>" "Domain for installation"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--port <port>" "HTTPS port (default: 9443)"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--port <port>" "HTTPS port (default: $DEFAULT_PORT)"
     printf "   ${CYAN}%-22s${NC} %s\n" "--template <1-11>" "Template number to install"
     printf "   ${CYAN}%-22s${NC} %s\n" "--panel-domain <domain>" "Domain for the 3x-ui panel"
     printf "   ${CYAN}%-22s${NC} %s\n" "--panel-port <port>" "Port for the 3x-ui panel (default: 8443)"
@@ -1351,7 +1430,7 @@ show_help() {
     echo
     echo -e "${WHITE}Xray Reality Configuration:${NC}"
     echo -e "  ${GRAY}Socket mode (default):  \"target\": \"/dev/shm/nginx.sock\", \"xver\": 1${NC}"
-    echo -e "  ${GRAY}TCP mode:               \"target\": \"127.0.0.1:9443\", \"xver\": 1${NC}"
+    echo -e "  ${GRAY}TCP mode:               \"target\": \"127.0.0.1:47443\", \"xver\": 1${NC}"
     echo
     echo -e "${WHITE}For more information, visit:${NC}"
     echo -e "  ${BLUE}https://github.com/DigneZzZ/remnawave-scripts${NC}"
@@ -1451,6 +1530,10 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             ;;
+        --no-panel)
+            NO_PANEL=true
+            shift
+            ;;
         --domain=*)
             FORCE_DOMAIN="${1#*=}"
             if [ -z "$FORCE_DOMAIN" ]; then
@@ -1542,6 +1625,18 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+# Filter ACME fallback ports so ACME doesn't select the panel port
+if [ "${NO_PANEL:-false}" = false ]; then
+    _temp_ports=()
+    for _port in "${ACME_FALLBACK_PORTS[@]}"; do
+        if [ "$_port" != "$PANEL_PORT" ]; then
+            _temp_ports+=("$_port")
+        fi
+    done
+    ACME_FALLBACK_PORTS=("${_temp_ports[@]}")
+    unset _temp_ports _port
+fi
 
 # Initialize web server configuration based on selection
 init_web_server_config() {
@@ -1941,6 +2036,11 @@ create_nginx_config() {
 SELF_STEAL_DOMAIN=$domain
 SELF_STEAL_PORT=$port
 
+# Panel Configuration
+PANEL_DOMAIN=${PANEL_DOMAIN:-$domain}
+PANEL_PORT=${PANEL_PORT:-8443}
+NO_PANEL=${NO_PANEL:-false}
+
 # Connection Mode: $connection_mode
 # Xray target: $connection_target
 # xver: 1 (proxy_protocol v1)
@@ -2158,6 +2258,59 @@ EOF
     
     # Create conf.d directory
     create_dir_safe "$APP_DIR/conf.d" || return 1
+
+    # Create panel proxy configuration if enabled
+    if [ "${NO_PANEL:-false}" = false ]; then
+        local p_domain="${PANEL_DOMAIN:-$domain}"
+        local p_port="${PANEL_PORT:-8443}"
+        local web_port="2053"
+        if [ -f "/opt/3x-ui/db/x-ui.db" ] && command -v sqlite3 >/dev/null 2>&1; then
+            local db_port
+            db_port=$(sqlite3 "/opt/3x-ui/db/x-ui.db" "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null || true)
+            if [ -n "$db_port" ]; then
+                web_port="$db_port"
+            fi
+        fi
+        
+        log_info "Generating panel proxy configuration for domain $p_domain on port $p_port (backend: 127.0.0.1:$web_port)..."
+        
+        cat > "$APP_DIR/conf.d/panel.conf" << EOF
+# Panel reverse proxy on non-standard HTTPS port
+server {
+    listen 0.0.0.0:$p_port ssl http2;
+    listen [::]:$p_port ssl http2;
+    server_name $p_domain;
+
+    ssl_certificate     /etc/nginx/ssl/fullchain.crt;
+    ssl_certificate_key /etc/nginx/ssl/private.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # Reverse proxy to 3x-ui panel
+    location / {
+        proxy_pass http://127.0.0.1:$web_port;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        # WebSocket support (required for 3x-ui live terminal)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400s;
+    }
+}
+EOF
+        log_success "panel.conf created"
+    else
+        log_info "Panel proxy disabled via --no-panel"
+        rm -f "$APP_DIR/conf.d/panel.conf"
+    fi
 
     # Create main nginx.conf
     cat > "$APP_DIR/nginx.conf" << 'EOF'
@@ -2397,6 +2550,14 @@ EOF
 # Install function
 install_command() {
     check_running_as_root
+    
+    # Migration: stop and remove Caddy if present
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^caddy-3xui$'; then
+        log_warning "Detected legacy caddy-3xui container. Removing..."
+        docker rm -fv caddy-3xui >/dev/null 2>&1 || true
+        rm -rf /opt/3x-ui/caddy
+        log_success "Legacy Caddy container removed"
+    fi
     
     # Validate force mode requirements
     if [ "$FORCE_MODE" = true ] && [ -z "$FORCE_DOMAIN" ]; then
@@ -2769,6 +2930,13 @@ install_command() {
         configure_3xui_socket
     fi
 
+    # Configure panel proxy loopback bindings if enabled
+    if [ "${NO_PANEL:-false}" = false ]; then
+        local p_domain="${PANEL_DOMAIN:-$domain}"
+        local p_port="${PANEL_PORT:-8443}"
+        configure_panel_proxy "$p_domain" "$p_port"
+    fi
+
     # Installation complete
     echo
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 50))${NC}"
@@ -2776,19 +2944,24 @@ install_command() {
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 50))${NC}"
     echo
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Web Server:" "$server_display_name"
-    printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Domain:" "$domain"
+    printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Decoy Domain:" "$domain"
     
     # Show connection mode info for Nginx
-    if true; then
-        if [ "$USE_SOCKET" = true ]; then
-            printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Connection Mode:" "Unix Socket"
-            printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Socket Path:" "$SOCKET_PATH"
-        else
-            printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Connection Mode:" "TCP Port"
-            printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "HTTPS Port:" "$port"
-        fi
+    if [ "$USE_SOCKET" = true ]; then
+        printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Decoy Connection:" "Unix Socket"
+        printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Decoy Socket:" "$SOCKET_PATH"
     else
-        printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "HTTPS Port:" "$port"
+        printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Decoy Connection:" "TCP Port"
+        printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Decoy Fallback Port:" "$port"
+    fi
+    
+    if [ "${NO_PANEL:-false}" = false ]; then
+        local p_domain="${PANEL_DOMAIN:-$domain}"
+        local p_port="${PANEL_PORT:-8443}"
+        printf "   ${WHITE}%-20s${NC} ${GREEN}%s${NC}\n" "Panel Proxy:" "Enabled"
+        printf "   ${WHITE}%-20s${NC} ${BLUE}%s${NC}\n" "Panel URL:" "https://${p_domain}:${p_port}"
+    else
+        printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Panel Proxy:" "Disabled"
     fi
     
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Installation Path:" "$APP_DIR"
@@ -2805,6 +2978,7 @@ install_command() {
         echo -e "${CYAN}     - target: \"127.0.0.1:$port\"${NC}"
     fi
     echo -e "${CYAN}     - xver: 1${NC}"
+    echo -e "${YELLOW}     - Reality Port Recommendation: Use high port (e.g. 47000+)${NC}"
     echo -e "${GRAY}   • Change template: $APP_NAME template${NC}"
     echo -e "${GRAY}   • Customize HTML content in: $HTML_DIR${NC}"
     echo -e "${GRAY}   • Check status: $APP_NAME status${NC}"
@@ -3721,14 +3895,33 @@ status_command() {
             printf "   ${WHITE}%-15s${NC} ${CYAN}%s${NC}\n" "Xray target:" "$SOCKET_PATH"
         else
             printf "   ${WHITE}%-15s${NC} ${GRAY}%s${NC}\n" "Connection:" "TCP Port"
-            printf "   ${WHITE}%-15s${NC} ${CYAN}%s${NC}\n" "Xray target:" "127.0.0.1:${port:-9443}"
+            printf "   ${WHITE}%-15s${NC} ${CYAN}%s${NC}\n" "Xray target:" "127.0.0.1:${port:-$DEFAULT_PORT}"
         fi
     else
-        printf "   ${WHITE}%-15s${NC} ${GRAY}%s${NC}\n" "HTTPS Port:" "${port:-9443}"
+        printf "   ${WHITE}%-15s${NC} ${GRAY}%s${NC}\n" "HTTPS Port:" "${port:-$DEFAULT_PORT}"
     fi
     printf "   ${WHITE}%-15s${NC} ${GRAY}%s${NC}\n" "HTML Path:" "$HTML_DIR"
     printf "   ${WHITE}%-15s${NC} ${GRAY}%s${NC}\n" "Script Version:" "v$SCRIPT_VERSION"
     
+    # Show panel proxy status
+    if [ "$WEB_SERVER" = "nginx" ]; then
+        echo
+        local panel_port="8443"
+        local panel_domain=""
+        local no_panel="false"
+        if [ -f "$APP_DIR/.env" ]; then
+            panel_port=$(grep "^PANEL_PORT=" "$APP_DIR/.env" 2>/dev/null | cut -d'=' -f2 || echo "8443")
+            panel_domain=$(grep "^PANEL_DOMAIN=" "$APP_DIR/.env" 2>/dev/null | cut -d'=' -f2 || true)
+            no_panel=$(grep "^NO_PANEL=" "$APP_DIR/.env" 2>/dev/null | cut -d'=' -f2 || echo "false")
+        fi
+        
+        if [ "$no_panel" = "false" ]; then
+            show_panel_status "${panel_domain:-$domain}" "$panel_port"
+        else
+            echo -e "   ${WHITE}Panel Proxy:${NC}       ${GRAY}Disabled${NC}"
+        fi
+    fi
+
     # Show SSL certificate info for Nginx
     if [ "$WEB_SERVER" = "nginx" ] && [ -f "$APP_DIR/ssl/fullchain.crt" ]; then
         echo
@@ -4077,6 +4270,9 @@ uninstall_command() {
     fi
     
     echo
+    # Restore panel loopback binding and delete config
+    remove_panel_proxy
+    
     log_info "Stopping services..."
     stop_services
     
@@ -4322,11 +4518,11 @@ guide_command() {
         if [ "$connection_mode" = "socket" ] || [ -z "$connection_mode" ]; then
             xray_target="$SOCKET_PATH"
         else
-            xray_target="127.0.0.1:${port:-9443}"
+            xray_target="127.0.0.1:${port:-$DEFAULT_PORT}"
         fi
     else
         xver_value=0
-        xray_target="127.0.0.1:${port:-9443}"
+        xray_target="127.0.0.1:${port:-$DEFAULT_PORT}"
     fi
 
     local server_name
@@ -4344,7 +4540,7 @@ guide_command() {
     if [ "$connection_mode" != "tcp" ]; then
         echo -e "${GRAY}1. Nginx listens on Unix Socket ($SOCKET_PATH)"
     else
-        echo -e "${GRAY}1. Nginx runs on internal port (127.0.0.1:${port:-9443})"
+        echo -e "${GRAY}1. Nginx runs on internal port (127.0.0.1:${port:-$DEFAULT_PORT})"
     fi
     echo -e "${GRAY}2. Xray Reality forwards traffic via proxy_protocol (xver: 1)"
     echo -e "${GRAY}3. Regular users see a normal website"
@@ -4483,7 +4679,7 @@ guide_command() {
     if [ "$WEB_SERVER" = "nginx" ] && [ "$connection_mode" != "tcp" ]; then
         echo -e "${GRAY}• ${WHITE}Reality not working:${GRAY} Check socket exists: ls -la $SOCKET_PATH${NC}"
     else
-        echo -e "${GRAY}• ${WHITE}Reality not working:${GRAY} Check port ${port:-9443} is listening${NC}"
+        echo -e "${GRAY}• ${WHITE}Reality not working:${GRAY} Check port ${port:-$DEFAULT_PORT} is listening${NC}"
     fi
     echo -e "${GRAY}• ${WHITE}Website not loading:${GRAY} Try changing templates (selfsteal template)${NC}"
     echo

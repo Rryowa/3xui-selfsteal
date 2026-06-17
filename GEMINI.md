@@ -9,12 +9,13 @@ This repository is a containerized infrastructure suite designed to deploy steal
 
 ### Core Components
 1.  **3x-ui Docker Panel (`3x-ui-docker.sh`):** Installs the `ghcr.io/mhsanaei/3x-ui` panel. This web panel runs Xray-core in the background and dynamically manages inbounds (VLESS, VMess, Trojan, Shadowsocks) stored in a SQLite database (`/opt/3x-ui/db/x-ui.db`).
-2.  **Caddy Selfsteal (`selfsteal.sh`):** Sets up Caddy as a "Reality" decoy server on port `9443`. It templates professional decoy sites (YouTube, converters, speedtests) to present to unauthorized scanners.
+2.  **Nginx Selfsteal (`selfsteal.sh`):** Sets up Nginx as a "Reality" decoy server. It templates professional decoy sites (YouTube, converters, speedtests) to present to unauthorized scanners.
 3.  **NetBird mesh VPN (`netbird.sh`):** Sets up an encrypted mesh networking tunnel via WireGuard between server nodes.
 
 ### Essential Networking Setup
-*   **Host Networking:** Both the 3x-ui and Caddy containers run with `network_mode: "host"`. They share the host system's loopback and network namespaces, bypassing Docker bridge isolations.
-*   **Reality Redirection:** Xray binds to public port `443`. Legitimate clients with authentic keys connect. Scanner probes or unauthorized requests are silently redirected internally to `127.0.0.1:9443`, where Caddy serves the decoy site to camouflage the server.
+*   **Host Networking:** Both the 3x-ui and Nginx decoy containers run with `network_mode: "host"`. They share the host system's loopback and network namespaces, bypassing Docker bridge isolations.
+*   **Reality Redirection:** Xray binds to public port `443`. Legitimate clients with authentic keys connect. Scanner probes or unauthorized requests are silently redirected internally to `127.0.0.1:47443` or `/dev/shm/nginx.sock`, where Nginx serves the decoy site to camouflage the server.
+*   **Nginx Panel Proxy:** Nginx also acts as a secure HTTPS reverse proxy for the 3x-ui web panel, listening on port `8443` and forwarding to local port `2053` (which is secured by binding it to loopback only).
 *   **NetBird Limit:** Because NetBird uses standard WireGuard over UDP, it will be blocked or throttled by border-level DPI. Thus, it cannot be used for cross-border links in censored regions.
 
 ---
@@ -26,7 +27,7 @@ Run these scripts with root privileges to deploy components:
 # 1. Spin up the 3x-ui Panel Docker container
 sudo bash ./3x-ui-docker.sh
 
-# 2. Spin up Caddy with decoy templates (Selfsteal)
+# 2. Spin up Nginx with decoy templates (Selfsteal)
 sudo bash ./selfsteal.sh @ install
 
 # 3. Deploy NetBird VPN interactive mesh menu
