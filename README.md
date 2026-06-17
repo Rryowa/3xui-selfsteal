@@ -24,8 +24,18 @@ Deploy Caddy as a **Reality traffic masking** solution with professional website
 
 ### Installation
 
+Compile and run via the Makefile:
 ```bash
-bash selfsteal.sh install
+# Production install
+make run ARGS="--domain your-domain.com install"
+
+# Staging test install (uses Let's Encrypt staging to bypass rate limits)
+make run ARGS="--domain your-domain.com --test install"
+```
+
+Or run the compiled script directly:
+```bash
+./dist/selfsteal.sh --domain your-domain.com install
 ```
 
 ### Commands
@@ -49,7 +59,7 @@ selfsteal template list              # List templates
 selfsteal template install converter # Install template
 ```
 
-> 🛡️ **v2.8.0:** every template is uniquified per install (no byte-identical fingerprint) and provenance leaks are stripped. HTTP/3 is **off by default** — enable with `--h3`; disable mutation with `--no-randomize`. See [README-selfsteal.md](README-selfsteal.md).
+> 🛡️ **v2.8.0:** every template is uniquified per install (no byte-identical fingerprint) and provenance leaks are stripped. HTTP/3 is **off by default** — enable with `--h3`; disable mutation with `--no-randomize`. Use `--test` or `--staging` to run with Let's Encrypt staging environment.
 
 **Xray Reality config:**
 ```json
