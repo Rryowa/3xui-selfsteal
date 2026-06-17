@@ -346,6 +346,11 @@ issue_ssl_certificate() {
         log_info "Issuing certificate via TLS-ALPN on port $try_port..."
         echo -e "${GRAY}This may take a minute...${NC}"
         
+        local acme_server="letsencrypt"
+        if [ "${USE_STAGING:-false}" = true ]; then
+            acme_server="letsencrypt_test"
+        fi
+
         local try_args=(
             --issue
             -d "$try_domain"
@@ -354,10 +359,14 @@ issue_ssl_certificate() {
             --alpn
             --tlsport "$try_port"
             --httpport 65535
-            --server letsencrypt
+            --server "$acme_server"
             --force
             --debug 2
         )
+        
+        if [ "${USE_STAGING:-false}" = true ]; then
+            try_args+=(--test)
+        fi
         
         if [ -n "$try_reload_cmd" ]; then
             try_args+=(--reloadcmd "$try_reload_cmd")

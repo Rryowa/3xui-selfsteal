@@ -9,6 +9,9 @@
 # ╚════════════════════════════════════════════════════════════════╝
 # VERSION=2.9.0
 
+# Capture script directory immediately before any cd commands are executed
+ORIGINAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 SCRIPT_VERSION="2.9.0"
 
 # Handle @ prefix for consistency with other scripts
@@ -68,6 +71,9 @@ FORCE_PORT=""
 FORCE_TEMPLATE=""
 PANEL_DOMAIN=""
 PANEL_PORT="8443"
+
+# Staging mode for Let's Encrypt (uses staging API to bypass rate limits)
+USE_STAGING=false
 
 # Manual SSL certificate paths (for wildcard/custom certs)
 MANUAL_SSL_CERT=""
@@ -159,6 +165,7 @@ show_help() {
     printf "   ${CYAN}%-22s${NC} %s\n" "--tcp" "Use TCP port instead of socket"
     printf "   ${CYAN}%-22s${NC} %s\n" "--acme-port <port>" "Custom port for ACME TLS-ALPN"
     printf "   ${CYAN}%-22s${NC} %s\n" "--no-randomize" "Don't mutate templates on install"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--test, --staging" "Use Let's Encrypt staging environment"
     echo
     echo -e "${WHITE}Force Install Options:${NC}"
     printf "   ${CYAN}%-22s${NC} %s\n" "--force, -f" "Skip DNS validation and prompts"
@@ -268,6 +275,11 @@ while [ $# -gt 0 ]; do
         --no-randomize|--no-mutate)
             # Disable per-install template mutation (serve templates as downloaded)
             RANDOMIZE_TEMPLATE=false
+            shift
+            ;;
+        --test|--staging)
+            # Use Let's Encrypt staging environment
+            USE_STAGING=true
             shift
             ;;
         --force|-f)
@@ -1276,7 +1288,7 @@ install_command() {
         if [ "$FORCE_MODE" = true ]; then
             log_info "Force mode: reinstalling Nginx..."
             local remove_dir="/opt/nginx-selfsteal"
-            cd "$remove_dir" 2>/dev/null && docker compose down 2>/dev/null || true
+            (cd "$remove_dir" 2>/dev/null && docker compose down 2>/dev/null) || true
             rm -rf "$remove_dir"
             log_success "Existing installation removed"
         else
@@ -1330,7 +1342,7 @@ install_command() {
                     fi
                     
                     log_warning "Removing existing Nginx installation..."
-                    cd "$remove_dir" 2>/dev/null && docker compose down 2>/dev/null || true
+                    (cd "$remove_dir" 2>/dev/null && docker compose down 2>/dev/null) || true
                     rm -rf "$remove_dir"
                     log_success "Existing installation removed"
                     echo
@@ -3536,8 +3548,7 @@ install_3xui_docker() {
     create_dir_safe "$XUI_DIR"
     
     # Check for a cloned 3x-ui repository in common locations
-    local SCRIPT_DIR
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local SCRIPT_DIR="$ORIGINAL_SCRIPT_DIR"
     
     local source_repo=""
     for loc in "$SCRIPT_DIR/3x-ui" "$SCRIPT_DIR/../3x-ui" "$(pwd)/3x-ui" "/root/3x-ui"; do
