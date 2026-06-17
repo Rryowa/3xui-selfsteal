@@ -348,7 +348,6 @@ issue_ssl_certificate() {
         
         local try_args=(
             --issue
-            --standalone
             -d "$try_domain"
             --key-file "$try_ssl_dir/private.key"
             --fullchain-file "$try_ssl_dir/fullchain.crt"
