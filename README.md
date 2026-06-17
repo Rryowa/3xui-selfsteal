@@ -117,16 +117,24 @@ bash netbird.sh init --key YOUR-SETUP-KEY
 bash netbird.sh menu
 ```
 
-### Building the Selfsteal Script
+### Building and Running the Selfsteal Script
 
-The `selfsteal.sh` script is built from modular components located in the `src/` directory. If you are developing and modifying the `selfsteal` script:
+The `selfsteal.sh` script is built from modular components located in the `src/` directory.
 
-1. Edit the relevant files in `src/` (e.g., `src/selfsteal/main.sh`, `src/selfsteal/acme.sh`).
-2. Run the build script to compile them:
-   ```bash
-   bash build.sh src/selfsteal/main.sh > dist/selfsteal.sh
-   ```
-3. Test your changes by running the compiled script.
+- **To Build**: Compile the script using the Makefile:
+  ```bash
+  make build
+  ```
+  This runs `src/build.sh` to compile all source files into the bundle at `dist/selfsteal.sh`.
+
+- **To Execute/Run**: Run the installer with your arguments:
+  ```bash
+  make run ARGS="--domain your-domain.com install"
+  ```
+  Or run the compiled bundle directly:
+  ```bash
+  ./dist/selfsteal.sh --domain your-domain.com install
+  ```
 
 
 ---
