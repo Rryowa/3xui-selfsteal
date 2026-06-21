@@ -73,13 +73,5 @@ If a user cannot load legitimate sites hosted on blocked subnets:
 *   VLESS clients by default open parallel connection pools on startup, triggering the parallel handshake count (>3).
 *   **Fix:** Enable **Mux** or **XMUX** inside your VLESS client settings. This forces all traffic through a single TCP socket.
 
-### C. 3x-ui v3.x Template Bloat
-*   Upgrading to 3x-ui v3.x causes blocks due to auto-injected timing parameters.
-*   **Fix:** Downgrade to `v2.9.4` or edit the advanced Xray config template to delete the lines:
-    ```json
-    "scMaxEachPostBytes": "1000000",
-    "scMinPostsIntervalMs": "30"
-    ```
-
-### D. Blank SNI
+### C. Blank SNI
 *   Leaving the SNI blank or removing it from the TLS handshake bypasses the behavioral counters on some ISPs, since the rule relies on tracking traffic patterns per SNI.

@@ -199,7 +199,7 @@ fi
 cat << 'DOCKER' > /opt/3x-ui/docker-compose.yml
 services:
   3xui:
-    image: ghcr.io/mhsanaei/3x-ui:v2.9.4
+    image: ghcr.io/mhsanaei/3x-ui:v3.3.1
     container_name: 3xui_app
     network_mode: host
     restart: unless-stopped

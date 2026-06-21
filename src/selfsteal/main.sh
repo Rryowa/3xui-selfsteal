@@ -1719,6 +1719,9 @@ install_command() {
         configure_panel_proxy "$p_domain" "$p_port"
     fi
 
+    # Automatically set up VLESS Reality inbound if no inbounds configured
+    setup_default_inbound "$domain"
+
     # Installation complete
     echo
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 50))${NC}"
@@ -1750,6 +1753,14 @@ install_command() {
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "HTML Content:" "$HTML_DIR"
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Installed Template:" "$installed_template"
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Management Command:" "$APP_NAME"
+    
+    if [ -f "$APP_DIR/vless.txt" ]; then
+        local vless_link
+        vless_link=$(cat "$APP_DIR/vless.txt")
+        printf "   ${WHITE}%-20s${NC} ${GREEN}%s${NC}\n" "VLESS Reality Link:" "$vless_link"
+        printf "   ${WHITE}%-20s${NC} ${YELLOW}%s${NC}\n" "Mux Advisory:" "Enable Mux/XMUX in client for single-socket mode"
+    fi
+    echo
     echo
     echo -e "${WHITE}📋 Next Steps:${NC}"
     echo -e "${GRAY}   • Configure your Xray Reality with:${NC}"
@@ -3707,7 +3718,7 @@ EOF
         cat > "$XUI_DIR/docker-compose.yml" << 'EOF'
 services:
   3xui:
-    image: ghcr.io/mhsanaei/3x-ui:v2.9.4
+    image: ghcr.io/mhsanaei/3x-ui:v3.3.1
     container_name: 3xui_app
     cap_add:
       - NET_ADMIN

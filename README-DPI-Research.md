@@ -95,12 +95,7 @@ For users who cannot open legitimate web resources hosted on Selectel/TimeWeb du
 *   Standard VLESS clients open connection pools on start. To avoid triggering the "3 parallel connections" limit, users must enable **Mux** or **XMUX** in their GUI clients (such as sing-box, Nekobox, or v2rayNG).
 *   Mux multiplexes all user traffic over a single TCP socket, preventing connection spikes.
 
-### C. 3x-ui v3.x Parameter Issues
-*   Upgrading to 3x-ui v3.x has caused immediate blocking for many.
-*   **Reason:** v3.x automatically injects two hidden parameters into the Xray configuration: `scMaxEachPostBytes: 1000000` and `scMinPostsIntervalMs: 30`, which trigger the TSPU's fingerprint blacklist.
-*   **Solution:** Downgrade to `v2.9.4` or edit the 3x-ui advanced config template to strip these two lines manually.
-
-### D. Blank SNI
+### C. Blank SNI
 *   TSPU rules rely on parsing the Server Name Indication (SNI) string. In configurations where an **empty/blank SNI** can be passed (or where direct routing does not require SNI mapping), the filter rules fail to evaluate the parallel handshake counter, bypassing the block.
 
 ---
