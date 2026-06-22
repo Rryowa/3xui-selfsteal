@@ -6,9 +6,10 @@ Stealthy VPN node deployment infrastructure utilizing **Docker**, **Nginx**, and
 
 ## 📦 Project Components
 
-1. **3x-ui Docker Panel (`3x-ui-docker.sh`)**: Sets up the Xray management web panel in host network mode.
-2. **Nginx Selfsteal (`selfsteal.sh`)**: Sets up Nginx as a Reality decoy server and secure reverse proxy.
-3. **NetBird VPN (`netbird.sh`)**: Configures encrypted mesh networking via WireGuard.
+1. **System Pre-setup (`sysprep.sh`)**: Performs system updates, swap setup, time synchronization, SSH hardening, and kernel tuning (BBR, TCP Fast Open, buffer tuning).
+2. **3x-ui Docker Panel (`3x-ui-docker.sh`)**: Sets up the Xray management web panel in host network mode (with optional HTTPS reverse proxy).
+3. **Nginx Selfsteal (`selfsteal.sh`)**: Sets up Nginx as a Reality decoy server.
+4. **NetBird VPN (`netbird.sh`)**: Configures encrypted mesh networking via WireGuard.
 
 ---
 
@@ -29,10 +30,12 @@ Stealthy VPN node deployment infrastructure utilizing **Docker**, **Nginx**, and
 ├── src/                      # Modular script source files
 │   ├── selfsteal/            # Nginx/SSL configuration scripts
 │   ├── common/               # Core helpers (Docker, logging, firewall)
+│   ├── 3x-ui-docker/         # 3x-ui configuration source
+│   ├── dest/                 # Compiled standalone scripts (gitignored)
+│   │   ├── selfsteal.sh
+│   │   └── 3x-ui-docker.sh
 │   └── build.sh              # Script builder utility
-├── dist/                     # Compiled scripts output
-│   └── selfsteal.sh          # Compiled standalone selfsteal script
-├── 3x-ui-docker.sh           # 3x-ui deployment script
+├── sysprep.sh                # System pre-setup (BBR tuning, swap, updates)
 ├── netbird.sh                # NetBird mesh VPN setup script
 └── Makefile                  # Project build commands
 ```
@@ -41,23 +44,41 @@ Stealthy VPN node deployment infrastructure utilizing **Docker**, **Nginx**, and
 
 ## 🛠️ How to Run
 
-### 1. Compile Standalone Script
+> [!NOTE]
+> All deployment scripts validate that the user is running as `root` firstly. Therefore, you do not need to prepend `sudo` to the commands; run them directly as `root` or using `make`.
+
+### Quick Install (Complete Setup)
+To compile, run the system tuner, deploy the 3x-ui panel, and set up Nginx decoy:
+```bash
+make install-all
+```
+
+---
+
+### Step-by-Step Installation
+
+#### 1. Compile Standalone Scripts
 ```bash
 make build
 ```
 
-### 2. Deploy 3x-ui Panel
+#### 2. Pre-setup System (BBR, Swap, Updates)
 ```bash
-sudo bash ./3x-ui-docker.sh
+make install-sysprep
 ```
 
-### 3. Deploy Nginx Decoy & Panel Proxy (Interactive)
+#### 3. Deploy 3x-ui Panel
 ```bash
-sudo ./dist/selfsteal.sh install
+make install-3x-ui
+```
+
+#### 4. Deploy Nginx Decoy (Interactive)
+```bash
+make install-selfsteal
 ```
 *Alternatively, run in non-interactive force mode:*
 ```bash
-sudo ./dist/selfsteal.sh --force --domain your-domain.com install
+make install-selfsteal ARGS="--force --domain your-domain.com"
 ```
 
 ---
@@ -67,12 +88,12 @@ sudo ./dist/selfsteal.sh --force --domain your-domain.com install
 ### 1. Run Staging Test Install
 Uses Let's Encrypt staging environment to bypass API rate limits:
 ```bash
-sudo ./dist/selfsteal.sh --domain your-domain.com --test --force install
+./src/dest/selfsteal.sh --domain your-domain.com --test --force install
 ```
 
 ### 2. Check Service Status
 ```bash
-sudo ./dist/selfsteal.sh status
+./src/dest/selfsteal.sh status
 ```
 
 ### 3. Verify Panel Proxy (GET)

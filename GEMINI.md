@@ -8,8 +8,8 @@ This document is compiled as an automated developer onboarding guide and a quick
 This repository is a containerized infrastructure suite designed to deploy stealthy proxy panels and VPN nodes using Docker. 
 
 ### Core Components
-1.  **3x-ui Docker Panel (`3x-ui-docker.sh`):** Installs the `ghcr.io/mhsanaei/3x-ui` panel. This web panel runs Xray-core in the background and dynamically manages inbounds (VLESS, VMess, Trojan, Shadowsocks) stored in a SQLite database (`/opt/3x-ui/db/x-ui.db`).
-2.  **Nginx Selfsteal (`selfsteal.sh`):** Sets up Nginx as a "Reality" decoy server. It templates professional decoy sites (YouTube, converters, speedtests) to present to unauthorized scanners.
+1.  **3x-ui Docker Panel (`src/dest/3x-ui-docker.sh`):** Installs the `ghcr.io/mhsanaei/3x-ui` panel. This web panel runs Xray-core in the background and dynamically manages inbounds (VLESS, VMess, Trojan, Shadowsocks) stored in a SQLite database (`/opt/3x-ui/db/x-ui.db`).
+2.  **Nginx Selfsteal (`src/dest/selfsteal.sh`):** Sets up Nginx as a "Reality" decoy server. It templates professional decoy sites (YouTube, converters, speedtests) to present to unauthorized scanners.
 3.  **NetBird mesh VPN (`netbird.sh`):** Sets up an encrypted mesh networking tunnel via WireGuard between server nodes.
 
 ### Essential Networking Setup
@@ -21,17 +21,17 @@ This repository is a containerized infrastructure suite designed to deploy steal
 ---
 
 ## 2. Running the Project Locally
-Run these scripts with root privileges to deploy components:
+Run these commands with root privileges to deploy components:
 
 ```bash
-# 1. Spin up the 3x-ui Panel Docker container
-sudo bash ./3x-ui-docker.sh
+# 1. Run complete installation sequentially (Recommended)
+make install-all
 
-# 2. Spin up Nginx with decoy templates (Selfsteal)
-sudo bash ./selfsteal.sh @ install
-
-# 3. Deploy NetBird VPN interactive mesh menu
-sudo bash ./netbird.sh menu
+# Alternatively, run components individually:
+# - Run system pre-setup and BBR/TCP tuning:    make install-sysprep
+# - Deploy 3x-ui Panel Docker container:         make install-3x-ui
+# - Deploy Nginx decoy templates (Selfsteal):   make install-selfsteal
+# - Deploy NetBird VPN interactive mesh menu:    make install-netbird
 ```
 
 ---
