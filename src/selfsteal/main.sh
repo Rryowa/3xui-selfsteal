@@ -1325,7 +1325,7 @@ setup_default_inbound() {
         inbound_count=$(sqlite3 "$db_file" "SELECT COUNT(*) FROM inbounds;" 2>/dev/null || echo "0")
         
         if [ "$inbound_count" = "0" ] || [ -z "$inbound_count" ]; then
-            log_info "No inbounds found in 3x-ui database. Auto-configuring default VLESS Reality inbound..."
+            log_info "No inbounds found in 3x-ui database. Auto-configuring default VLESS inbound..."
             
             # Generate random credentials
             local uuid
@@ -1334,40 +1334,63 @@ setup_default_inbound() {
                 uuid=$(od -x -N 16 /dev/urandom | head -n 1 | awk '{print $2$3"-"$4"-"$5"-"$6"-"$7$8$9}')
             fi
             
-            local short_id
-            short_id=$(openssl rand -hex 8 2>/dev/null || od -v -An -N 8 -t x1 /dev/urandom | tr -d ' \n')
-            
-            # Generate Reality keypair via xray container
-            local key_output=""
-            if docker ps -q -f "name=3xui_app" 2>/dev/null | grep -q .; then
-                key_output=$(docker exec 3xui_app bin/xray-linux-amd64 x25519 2>/dev/null || docker exec 3xui_app xray x25519 2>/dev/null || true)
-            fi
-            
             local priv_key=""
             local pub_key=""
-            if [ -n "$key_output" ]; then
-                priv_key=$(echo "$key_output" | grep "^PrivateKey:" | awk '{print $NF}')
-                pub_key=$(echo "$key_output" | grep -E "^(Password \(PublicKey\)|PublicKey):" | awk '{print $NF}')
-            fi
-            
-            if [ -z "$priv_key" ] || [ -z "$pub_key" ]; then
-                log_warning "Could not auto-generate Reality keypair. Skipping default inbound setup."
-                log_warning "Try manually: docker exec 3xui_app xray x25519"
-                return 0
-            fi
-            
-            # Validate pub_key looks like a valid x25519 base64 key (43-44 chars)
-            if [ ${#pub_key} -lt 40 ]; then
-                log_warning "Generated PublicKey looks invalid (length=${#pub_key}). Skipping default inbound setup."
-                return 0
+            local short_id=""
+            if [ "$USE_XHTTP" != true ]; then
+                short_id=$(openssl rand -hex 8 2>/dev/null || od -v -An -N 8 -t x1 /dev/urandom | tr -d ' \n')
+                
+                # Generate Reality keypair via xray container
+                local key_output=""
+                if docker ps -q -f "name=3xui_app" 2>/dev/null | grep -q .; then
+                    key_output=$(docker exec 3xui_app bin/xray-linux-amd64 x25519 2>/dev/null || docker exec 3xui_app xray x25519 2>/dev/null || true)
+                fi
+                
+                if [ -n "$key_output" ]; then
+                    priv_key=$(echo "$key_output" | grep "^PrivateKey:" | awk '{print $NF}')
+                    pub_key=$(echo "$key_output" | grep -E "^(Password \(PublicKey\)|PublicKey):" | awk '{print $NF}')
+                fi
+                
+                if [ -z "$priv_key" ] || [ -z "$pub_key" ]; then
+                    log_warning "Could not auto-generate Reality keypair. Skipping default inbound setup."
+                    log_warning "Try manually: docker exec 3xui_app xray x25519"
+                    return 0
+                fi
+                
+                # Validate pub_key looks like a valid x25519 base64 key (43-44 chars)
+                if [ ${#pub_key} -lt 40 ]; then
+                    log_warning "Generated PublicKey looks invalid (length=${#pub_key}). Skipping default inbound setup."
+                    return 0
+                fi
             fi
             
             local settings_json="{\"clients\":[{\"id\":\"$uuid\",\"flow\":\"\",\"email\":\"admin@$domain\",\"limitIp\":0,\"totalGB\":0,\"expiryTime\":0}],\"decryption\":\"none\",\"fallbacks\":[]}"
-            local stream_settings_json="{\"network\":\"xhttp\",\"security\":\"reality\",\"externalProxy\":[],\"realitySettings\":{\"show\":false,\"xver\":1,\"dest\":\"/dev/shm/nginx.sock\",\"spiderX\":\"/\",\"serverNames\":[\"$domain\"],\"privateKey\":\"$priv_key\",\"minClient\":\"\",\"maxClient\":\"\",\"maxTimediff\":0,\"shortIds\":[\"$short_id\"]},\"xhttpSettings\":{\"mode\":\"auto\",\"host\":\"\",\"path\":\"/\"}}"
             local sniffing_json="{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"],\"metadataOnly\":false,\"routeOnly\":false}"
             
-            # Insert inbound record
-            sqlite3 "$db_file" "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, traffic_reset, last_traffic_reset_time, listen, port, protocol, settings, stream_settings, tag, sniffing, node_id, origin_node_guid) VALUES (0, 0, 0, 0, 'VLESS-REALITY', 1, 0, 'never', 0, '0.0.0.0', 443, 'vless', '$settings_json', '$stream_settings_json', 'inbound-443', '$sniffing_json', 0, '');"
+            local remark="VLESS-REALITY"
+            local tag="inbound-443"
+            local listen="0.0.0.0"
+            local bind_port=443
+            local stream_settings_json="{\"network\":\"xhttp\",\"security\":\"reality\",\"externalProxy\":[],\"realitySettings\":{\"show\":false,\"xver\":1,\"dest\":\"/dev/shm/nginx.sock\",\"spiderX\":\"/\",\"serverNames\":[\"$domain\"],\"privateKey\":\"$priv_key\",\"minClient\":\"\",\"maxClient\":\"\",\"maxTimediff\":0,\"shortIds\":[\"$short_id\"]},\"xhttpSettings\":{\"mode\":\"auto\",\"host\":\"\",\"path\":\"/\"}}"
+            
+            if [ "$USE_XHTTP" = true ]; then
+                remark="VLESS-Nginx-XHTTP"
+                tag="inbound-xhttp"
+                listen="127.0.0.1"
+                bind_port="$port"
+                stream_settings_json="{\"network\":\"xhttp\",\"security\":\"none\",\"externalProxy\":[],\"xhttpSettings\":{\"mode\":\"auto\",\"host\":\"\",\"path\":\"/xhttp\",\"xPaddingBytes\":\"100-1000\",\"scMaxBufferedPosts\":30,\"scStreamUpServerSecs\":\"20-80\"}}"
+            fi
+
+            # Insert inbound record and retrieve newly created ID
+            local inbound_id
+            inbound_id=$(sqlite3 "$db_file" "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, traffic_reset, last_traffic_reset_time, listen, port, protocol, settings, stream_settings, tag, sniffing, node_id, origin_node_guid) VALUES (0, 0, 0, 0, '$remark', 1, 0, 'never', 0, '$listen', $bind_port, 'vless', '$settings_json', '$stream_settings_json', '$tag', '$sniffing_json', 0, ''); SELECT last_insert_rowid();")
+            
+            if [ -n "$inbound_id" ] && [[ "$inbound_id" =~ ^[0-9]+$ ]]; then
+                log_info "Updating client_traffics tracking record for inbound ID $inbound_id..."
+                sqlite3 "$db_file" "INSERT INTO client_traffics (inbound_id, enable, email, up, down, expiry_time, total, reset, last_online) VALUES ($inbound_id, 1, 'admin@$domain', 0, 0, 0, 0, 0, 0);"
+            else
+                log_warning "Could not retrieve auto-created inbound ID. client_traffics table not updated."
+            fi
             
             # Restart 3x-ui container to apply inbound
             if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^3xui_app$'; then
@@ -1379,10 +1402,20 @@ setup_default_inbound() {
             fi
             
             # Save link to config directory
-            local vless_link="vless://$uuid@$domain:443?security=reality&encryption=none&sni=$domain&fp=chrome&pbk=$pub_key&sid=$short_id&spiderX=%2F&type=xhttp&mode=auto&host=$domain&path=%2F#VLESS-Reality-Selfsteal"
+            local vless_link
+            if [ "$USE_XHTTP" = true ]; then
+                vless_link="vless://$uuid@$domain:443?security=tls&encryption=none&sni=$domain&type=xhttp&mode=auto&host=$domain&path=%2Fxhttp#VLESS-Nginx-XHTTP"
+            else
+                vless_link="vless://$uuid@$domain:443?security=reality&encryption=none&sni=$domain&fp=chrome&pbk=$pub_key&sid=$short_id&spiderX=%2F&type=xhttp&mode=auto&host=$domain&path=%2F#VLESS-Reality-Selfsteal"
+            fi
             mkdir -p "$APP_DIR"
             echo "$vless_link" > "$APP_DIR/vless.txt"
-            log_success "Default VLESS Reality inbound auto-configured!"
+            
+            if [ "$USE_XHTTP" = true ]; then
+                log_success "Default VLESS xHTTP Nginx inbound auto-configured!"
+            else
+                log_success "Default VLESS Reality inbound auto-configured!"
+            fi
             
             log_info "Import the link above into your client (v2rayN, sing-box, Mihomo, NekoBox, v2rayNG)."
             log_info "Enable Mux/XMUX in client settings to force single-socket mode."
