@@ -1381,15 +1381,19 @@ setup_default_inbound() {
                 stream_settings_json="{\"network\":\"xhttp\",\"security\":\"none\",\"externalProxy\":[],\"xhttpSettings\":{\"mode\":\"auto\",\"host\":\"\",\"path\":\"/xhttp\",\"xPaddingBytes\":\"100-1000\",\"scMaxBufferedPosts\":30,\"scStreamUpServerSecs\":\"20-80\"}}"
             fi
 
+            # Ensure client exists in clients table and is synchronized
+            sqlite3 "$db_file" "INSERT OR REPLACE INTO clients (id, email, sub_id, uuid, enable, created_at, updated_at) VALUES (1, 'admin@$domain', '', '$uuid', 1, 0, 0);"
+
             # Insert inbound record and retrieve newly created ID
             local inbound_id
-            inbound_id=$(sqlite3 "$db_file" "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, traffic_reset, last_traffic_reset_time, listen, port, protocol, settings, stream_settings, tag, sniffing, node_id, origin_node_guid) VALUES (0, 0, 0, 0, '$remark', 1, 0, 'never', 0, '$listen', $bind_port, 'vless', '$settings_json', '$stream_settings_json', '$tag', '$sniffing_json', 0, ''); SELECT last_insert_rowid();")
+            inbound_id=$(sqlite3 "$db_file" "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, traffic_reset, last_traffic_reset_time, listen, port, protocol, settings, stream_settings, tag, sniffing, node_id, share_addr_strategy, share_addr, origin_node_guid) VALUES (1, 0, 0, 0, '$remark', 1, 0, 'never', 0, '$listen', $bind_port, 'vless', '$settings_json', '$stream_settings_json', '$tag', '$sniffing_json', NULL, 'listen', '', ''); SELECT last_insert_rowid();")
             
             if [ -n "$inbound_id" ] && [[ "$inbound_id" =~ ^[0-9]+$ ]]; then
-                log_info "Updating client_traffics tracking record for inbound ID $inbound_id..."
+                log_info "Updating client mappings for inbound ID $inbound_id..."
+                sqlite3 "$db_file" "INSERT OR IGNORE INTO client_inbounds (client_id, inbound_id, flow_override, created_at) VALUES (1, $inbound_id, '', 0);"
                 sqlite3 "$db_file" "INSERT INTO client_traffics (inbound_id, enable, email, up, down, expiry_time, total, reset, last_online) VALUES ($inbound_id, 1, 'admin@$domain', 0, 0, 0, 0, 0, 0);"
             else
-                log_warning "Could not retrieve auto-created inbound ID. client_traffics table not updated."
+                log_warning "Could not retrieve auto-created inbound ID. Client mappings not updated."
             fi
             
             # Restart 3x-ui container to apply inbound
