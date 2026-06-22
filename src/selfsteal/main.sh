@@ -69,9 +69,6 @@ FORCE_MODE=false
 FORCE_DOMAIN=""
 FORCE_PORT=""
 FORCE_TEMPLATE=""
-PANEL_DOMAIN=""
-PANEL_PORT="8443"
-NO_PANEL=false
 
 # Staging mode for Let's Encrypt (uses staging API to bypass rate limits)
 USE_STAGING=false
@@ -141,8 +138,6 @@ source src/common/logging.sh
 source src/common/docker.sh
 source src/selfsteal/acme.sh
 source src/selfsteal/socket.sh
-source src/selfsteal/panel.sh
-
 
 source src/common/firewall.sh
 
@@ -158,7 +153,6 @@ show_help() {
     echo -e "  ${CYAN}$APP_NAME${NC} [${GRAY}command${NC}] [${GRAY}options${NC}]"
     echo
     echo -e "${WHITE}Options:${NC}"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--install-3xui" "Install official 3x-ui in Docker"
     printf "   ${CYAN}%-22s${NC} %s\n" "--socket" "Use Unix socket (default)"
     printf "   ${CYAN}%-22s${NC} %s\n" "--tcp" "Use TCP port instead of socket"
     printf "   ${CYAN}%-22s${NC} %s\n" "--acme-port <port>" "Custom port for ACME TLS-ALPN"
@@ -170,8 +164,6 @@ show_help() {
     printf "   ${CYAN}%-22s${NC} %s\n" "--domain <domain>" "Domain for installation"
     printf "   ${CYAN}%-22s${NC} %s\n" "--port <port>" "HTTPS port (default: $DEFAULT_PORT)"
     printf "   ${CYAN}%-22s${NC} %s\n" "--template <1-11>" "Template number to install"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--panel-domain <domain>" "Domain for the 3x-ui panel"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--panel-port <port>" "Port for the 3x-ui panel (default: 8443)"
     echo
     echo -e "${WHITE}Manual SSL Certificate:${NC}"
     printf "   ${CYAN}%-22s${NC} %s\n" "--ssl-cert <path>" "Path to fullchain certificate"
@@ -206,9 +198,6 @@ show_help() {
     echo -e "  ${GRAY}# Install with manual wildcard certificate${NC}"
     echo -e "  ${CYAN}$APP_NAME --force --domain reality.example.com \\${NC}"
     echo -e "  ${CYAN}    --ssl-cert /path/to/fullchain.crt --ssl-key /path/to/private.key install${NC}"
-    echo
-    echo -e "  ${GRAY}# Install official 3x-ui in Docker${NC}"
-    echo -e "  ${CYAN}$APP_NAME --install-3xui${NC}"
     echo
     echo -e "${WHITE}Xray Reality Configuration:${NC}"
     echo -e "  ${GRAY}Socket mode (default):  \"target\": \"/dev/shm/nginx.sock\", \"xver\": 1${NC}"
@@ -266,10 +255,6 @@ while [ $# -gt 0 ]; do
             USE_SOCKET=true
             shift
             ;;
-        --install-3xui)
-            INSTALL_3XUI=true
-            shift
-            ;;
         --no-randomize|--no-mutate)
             # Disable per-install template mutation (serve templates as downloaded)
             RANDOMIZE_TEMPLATE=false
@@ -293,28 +278,6 @@ while [ $# -gt 0 ]; do
                 log_error "--domain requires a domain name"
                 exit 1
             fi
-            ;;
-        --panel-domain)
-            if [ -n "$2" ] && [[ ! "$2" =~ ^- ]]; then
-                PANEL_DOMAIN="$2"
-                shift 2
-            else
-                log_error "--panel-domain requires a domain name"
-                exit 1
-            fi
-            ;;
-        --panel-port)
-            if [ -n "$2" ] && [[ "$2" =~ ^[0-9]+$ ]]; then
-                PANEL_PORT="$2"
-                shift 2
-            else
-                log_error "--panel-port requires a valid port number"
-                exit 1
-            fi
-            ;;
-        --no-panel)
-            NO_PANEL=true
-            shift
             ;;
         --domain=*)
             FORCE_DOMAIN="${1#*=}"
@@ -408,17 +371,6 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Filter ACME fallback ports so ACME doesn't select the panel port
-if [ "${NO_PANEL:-false}" = false ]; then
-    _temp_ports=()
-    for _port in "${ACME_FALLBACK_PORTS[@]}"; do
-        if [ "$_port" != "$PANEL_PORT" ]; then
-            _temp_ports+=("$_port")
-        fi
-    done
-    ACME_FALLBACK_PORTS=("${_temp_ports[@]}")
-    unset _temp_ports _port
-fi
 
 # Initialize web server configuration based on selection
 init_web_server_config() {
@@ -818,11 +770,6 @@ create_nginx_config() {
 SELF_STEAL_DOMAIN=$domain
 SELF_STEAL_PORT=$port
 
-# Panel Configuration
-PANEL_DOMAIN=${PANEL_DOMAIN:-$domain}
-PANEL_PORT=${PANEL_PORT:-8443}
-NO_PANEL=${NO_PANEL:-false}
-
 # Connection Mode: $connection_mode
 # Xray target: $connection_target
 # xver: 1 (proxy_protocol v1)
@@ -1040,59 +987,6 @@ EOF
     
     # Create conf.d directory
     create_dir_safe "$APP_DIR/conf.d" || return 1
-
-    # Create panel proxy configuration if enabled
-    if [ "${NO_PANEL:-false}" = false ]; then
-        local p_domain="${PANEL_DOMAIN:-$domain}"
-        local p_port="${PANEL_PORT:-8443}"
-        local web_port="2053"
-        if [ -f "/opt/3x-ui/db/x-ui.db" ] && command -v sqlite3 >/dev/null 2>&1; then
-            local db_port
-            db_port=$(sqlite3 "/opt/3x-ui/db/x-ui.db" "SELECT value FROM settings WHERE key='webPort';" 2>/dev/null || true)
-            if [ -n "$db_port" ]; then
-                web_port="$db_port"
-            fi
-        fi
-        
-        log_info "Generating panel proxy configuration for domain $p_domain on port $p_port (backend: 127.0.0.1:$web_port)..."
-        
-        cat > "$APP_DIR/conf.d/panel.conf" << EOF
-# Panel reverse proxy on non-standard HTTPS port
-server {
-    listen 0.0.0.0:$p_port ssl http2;
-    listen [::]:$p_port ssl http2;
-    server_name $p_domain;
-
-    ssl_certificate     /etc/nginx/ssl/fullchain.crt;
-    ssl_certificate_key /etc/nginx/ssl/private.key;
-    ssl_protocols       TLSv1.2 TLSv1.3;
-    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache   shared:SSL:10m;
-    ssl_session_timeout 1d;
-    ssl_session_tickets off;
-
-    # Reverse proxy to 3x-ui panel
-    location / {
-        proxy_pass http://127.0.0.1:$web_port;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-
-        # WebSocket support (required for 3x-ui live terminal)
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 86400s;
-    }
-}
-EOF
-        log_success "panel.conf created"
-    else
-        log_info "Panel proxy disabled via --no-panel"
-        rm -f "$APP_DIR/conf.d/panel.conf"
-    fi
 
     # Create main nginx.conf
     cat > "$APP_DIR/nginx.conf" << 'EOF'
@@ -1329,6 +1223,80 @@ EOF
     fi
 }
 
+# Helper to automatically setup default VLESS Reality inbound if no inbounds configured
+setup_default_inbound() {
+    local domain="$1"
+    
+    [ "$DEBUG_MODE" = true ] && echo "DEBUG: setup_default_inbound started, domain=$domain"
+    
+    local db_file="/opt/3x-ui/db/x-ui.db"
+    if [ -f "$db_file" ] && command -v sqlite3 >/dev/null 2>&1; then
+        local inbound_count
+        inbound_count=$(sqlite3 "$db_file" "SELECT COUNT(*) FROM inbounds;" 2>/dev/null || echo "0")
+        
+        if [ "$inbound_count" = "0" ] || [ -z "$inbound_count" ]; then
+            log_info "No inbounds found in 3x-ui database. Auto-configuring default VLESS Reality inbound..."
+            
+            # Generate random credentials
+            local uuid
+            uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || true)
+            if [ -z "$uuid" ]; then
+                uuid=$(od -x -N 16 /dev/urandom | head -n 1 | awk '{print $2$3"-"$4"-"$5"-"$6"-"$7$8$9}')
+            fi
+            
+            local short_id
+            short_id=$(openssl rand -hex 8 2>/dev/null || od -v -An -N 8 -t x1 /dev/urandom | tr -d ' \n')
+            
+            # Generate Reality keypair via xray container
+            local key_output=""
+            if docker ps -q -f "name=3xui_app" 2>/dev/null | grep -q .; then
+                key_output=$(docker exec 3xui_app bin/xray-linux-amd64 x25519 2>/dev/null || docker exec 3xui_app xray x25519 2>/dev/null || true)
+            fi
+            
+            local priv_key=""
+            local pub_key=""
+            if [ -n "$key_output" ]; then
+                priv_key=$(echo "$key_output" | grep "^PrivateKey:" | awk '{print $NF}')
+                pub_key=$(echo "$key_output" | grep -E "^(Password \(PublicKey\)|PublicKey):" | awk '{print $NF}')
+            fi
+            
+            if [ -z "$priv_key" ] || [ -z "$pub_key" ]; then
+                log_warning "Could not auto-generate Reality keypair. Skipping default inbound setup."
+                log_warning "Try manually: docker exec 3xui_app xray x25519"
+                return 0
+            fi
+            
+            # Validate pub_key looks like a valid x25519 base64 key (43-44 chars)
+            if [ ${#pub_key} -lt 40 ]; then
+                log_warning "Generated PublicKey looks invalid (length=${#pub_key}). Skipping default inbound setup."
+                return 0
+            fi
+            
+            local settings_json="{\"clients\":[{\"id\":\"$uuid\",\"flow\":\"xtls-rprx-vision\",\"email\":\"admin@$domain\",\"limitIp\":0,\"totalGB\":0,\"expiryTime\":0}],\"decryption\":\"none\",\"fallbacks\":[]}"
+            local stream_settings_json="{\"network\":\"tcp\",\"security\":\"reality\",\"externalProxy\":[],\"realitySettings\":{\"show\":false,\"xver\":1,\"dest\":\"/dev/shm/nginx.sock\",\"spiderX\":\"/\",\"serverNames\":[\"$domain\"],\"privateKey\":\"$priv_key\",\"minClient\":\"\",\"maxClient\":\"\",\"maxTimediff\":0,\"shortIds\":[\"$short_id\"]},\"tcpSettings\":{\"acceptProxyProtocol\":false,\"header\":{\"type\":\"none\"}}}"
+            local sniffing_json="{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"],\"metadataOnly\":false,\"routeOnly\":false}"
+            
+            # Insert inbound record
+            sqlite3 "$db_file" "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, traffic_reset, last_traffic_reset_time, listen, port, protocol, settings, stream_settings, tag, sniffing, node_id, origin_node_guid) VALUES (0, 0, 0, 0, 'VLESS-REALITY', 1, 0, 'never', 0, '0.0.0.0', 443, 'vless', '$settings_json', '$stream_settings_json', 'inbound-443', '$sniffing_json', 0, '');"
+            
+            # Restart 3x-ui container to apply inbound
+            if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^3xui_app$'; then
+                log_info "Restarting 3xui_app container to apply inbound configuration..."
+                docker restart 3xui_app >/dev/null 2>&1 || true
+            fi
+            
+            # Save link to config directory
+            local vless_link="vless://$uuid@$domain:443?security=reality&encryption=none&sni=$domain&fp=chrome&pbk=$pub_key&sid=$short_id&spiderX=%2F&flow=xtls-rprx-vision&type=tcp&headerType=none#VLESS-Reality-Selfsteal"
+            mkdir -p "$APP_DIR"
+            echo "$vless_link" > "$APP_DIR/vless.txt"
+            log_success "Default VLESS Reality inbound auto-configured!"
+            
+            log_info "Import the link above into your client (v2rayN, sing-box, Mihomo, NekoBox, v2rayNG)."
+            log_info "Enable Mux/XMUX in client settings to force single-socket mode."
+        fi
+    fi
+}
+
 # Install function
 install_command() {
     check_running_as_root
@@ -1439,9 +1407,6 @@ install_command() {
     if ! check_system_requirements; then
         return 1
     fi
-
-    # Install 3x-ui Panel in Docker by default
-    install_3xui_docker
 
     # Collect configuration
     echo -e "${WHITE}📝 Configuration Setup${NC}"
@@ -1712,12 +1677,7 @@ install_command() {
         configure_3xui_socket
     fi
 
-    # Configure panel proxy loopback bindings if enabled
-    if [ "${NO_PANEL:-false}" = false ]; then
-        local p_domain="${PANEL_DOMAIN:-$domain}"
-        local p_port="${PANEL_PORT:-8443}"
-        configure_panel_proxy "$p_domain" "$p_port"
-    fi
+
 
     # Automatically set up VLESS Reality inbound if no inbounds configured
     setup_default_inbound "$domain"
@@ -1740,14 +1700,7 @@ install_command() {
         printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Decoy Fallback Port:" "$port"
     fi
     
-    if [ "${NO_PANEL:-false}" = false ]; then
-        local p_domain="${PANEL_DOMAIN:-$domain}"
-        local p_port="${PANEL_PORT:-8443}"
-        printf "   ${WHITE}%-20s${NC} ${GREEN}%s${NC}\n" "Panel Proxy:" "Enabled"
-        printf "   ${WHITE}%-20s${NC} ${BLUE}%s${NC}\n" "Panel URL:" "https://${p_domain}:${p_port}"
-    else
-        printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Panel Proxy:" "Disabled"
-    fi
+
     
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Installation Path:" "$APP_DIR"
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "HTML Content:" "$HTML_DIR"
@@ -2696,25 +2649,6 @@ status_command() {
     printf "   ${WHITE}%-15s${NC} ${GRAY}%s${NC}\n" "HTML Path:" "$HTML_DIR"
     printf "   ${WHITE}%-15s${NC} ${GRAY}%s${NC}\n" "Script Version:" "v$SCRIPT_VERSION"
     
-    # Show panel proxy status
-    if [ "$WEB_SERVER" = "nginx" ]; then
-        echo
-        local panel_port="8443"
-        local panel_domain=""
-        local no_panel="false"
-        if [ -f "$APP_DIR/.env" ]; then
-            panel_port=$(grep "^PANEL_PORT=" "$APP_DIR/.env" 2>/dev/null | cut -d'=' -f2 || echo "8443")
-            panel_domain=$(grep "^PANEL_DOMAIN=" "$APP_DIR/.env" 2>/dev/null | cut -d'=' -f2 || true)
-            no_panel=$(grep "^NO_PANEL=" "$APP_DIR/.env" 2>/dev/null | cut -d'=' -f2 || echo "false")
-        fi
-        
-        if [ "$no_panel" = "false" ]; then
-            show_panel_status "${panel_domain:-$domain}" "$panel_port"
-        else
-            echo -e "   ${WHITE}Panel Proxy:${NC}       ${GRAY}Disabled${NC}"
-        fi
-    fi
-
     # Show SSL certificate info for Nginx
     if [ "$WEB_SERVER" = "nginx" ] && [ -f "$APP_DIR/ssl/fullchain.crt" ]; then
         echo
@@ -3062,9 +2996,7 @@ uninstall_command() {
         return 0
     fi
     
-    echo
-    # Restore panel loopback binding and delete config
-    remove_panel_proxy
+
     
     log_info "Stopping services..."
     stop_services
@@ -3661,95 +3593,7 @@ main_menu() {
     done
 }
 
-install_3xui_docker() {
-    check_running_as_root
-    log_info "Installing official 3x-ui Panel in Docker..."
-    
-    # Check if Docker is installed
-    if ! command -v docker >/dev/null 2>&1; then
-        install_docker || { log_error "Docker is required but could not be installed."; exit 1; }
-    fi
-    
-    local XUI_DIR="/opt/3x-ui"
-    create_dir_safe "$XUI_DIR"
-    
-    # Check for a cloned 3x-ui repository in common locations
-    local SCRIPT_DIR="$ORIGINAL_SCRIPT_DIR"
-    
-    local source_repo=""
-    for loc in "$SCRIPT_DIR/3x-ui" "$SCRIPT_DIR/../3x-ui" "$(pwd)/3x-ui" "/root/3x-ui"; do
-        if [ -d "$loc" ] && [ -f "$loc/Dockerfile" ]; then
-            source_repo="$loc"
-            break
-        fi
-    done
-    
-    if [ -n "$source_repo" ]; then
-        log_info "Found cloned 3x-ui repository at: $source_repo"
-        log_info "Copying source files to $XUI_DIR/src..."
-        rm -rf "$XUI_DIR/src"
-        mkdir -p "$XUI_DIR/src"
-        cp -r "$source_repo/." "$XUI_DIR/src/"
-        
-        # Create docker-compose.yml to build from source
-        cat > "$XUI_DIR/docker-compose.yml" << 'EOF'
-services:
-  3xui:
-    build:
-      context: ./src
-      dockerfile: Dockerfile
-    container_name: 3xui_app
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    volumes:
-      - ./db/:/etc/x-ui/
-      - ./cert/:/root/cert/
-      - /dev/shm:/dev/shm
-    environment:
-      XRAY_VMESS_AEAD_FORCED: "false"
-      XUI_ENABLE_FAIL2BAN: "true"
-    network_mode: "host"
-    restart: unless-stopped
-EOF
-    else
-        log_info "Cloned 3x-ui repository not found. Falling back to official ghcr.io image..."
-        # Create docker-compose.yml to pull pre-built image
-        cat > "$XUI_DIR/docker-compose.yml" << 'EOF'
-services:
-  3xui:
-    image: ghcr.io/mhsanaei/3x-ui:v3.3.1
-    container_name: 3xui_app
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    volumes:
-      - ./db/:/etc/x-ui/
-      - ./cert/:/root/cert/
-      - /dev/shm:/dev/shm
-    environment:
-      XRAY_VMESS_AEAD_FORCED: "false"
-      XUI_ENABLE_FAIL2BAN: "true"
-    network_mode: "host"
-    restart: unless-stopped
-EOF
-    fi
-    
-    log_info "Starting 3x-ui container..."
-    cd "$XUI_DIR"
-    if docker compose up -d; then
-        log_success "3x-ui Docker container started successfully. Access it at port 2053."
-    else
-        log_error "Failed to start 3x-ui Docker container"
-        exit 1
-    fi
-    cd - >/dev/null
-}
 
-if [ "${INSTALL_3XUI:-false}" = true ]; then
-    install_3xui_docker
-    exit 0
-fi
 
 # Auto-detect existing installation if server wasn't specified via command line
 # This allows running commands on existing installation
