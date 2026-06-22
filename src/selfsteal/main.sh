@@ -1336,8 +1336,18 @@ install_command() {
         if [ "$FORCE_MODE" = true ]; then
             log_info "Force mode: reinstalling Nginx..."
             local remove_dir="/opt/nginx-selfsteal"
+            # Backup existing SSL certificates to reuse them
+            local ssl_backup_dir="/tmp/selfsteal_ssl_backup_$$"
+            if [ -d "$remove_dir/ssl" ]; then
+                cp -r "$remove_dir/ssl" "$ssl_backup_dir" 2>/dev/null || true
+            fi
             (cd "$remove_dir" 2>/dev/null && docker compose down 2>/dev/null) || true
             rm -rf "$remove_dir"
+            # Restore SSL backup
+            if [ -d "$ssl_backup_dir" ]; then
+                mkdir -p "$remove_dir"
+                mv "$ssl_backup_dir" "$remove_dir/ssl"
+            fi
             log_success "Existing installation removed"
         else
             echo
@@ -1390,8 +1400,18 @@ install_command() {
                     fi
                     
                     log_warning "Removing existing Nginx installation..."
+                    # Backup existing SSL certificates to reuse them
+                    local ssl_backup_dir="/tmp/selfsteal_ssl_backup_$$"
+                    if [ -d "$remove_dir/ssl" ]; then
+                        cp -r "$remove_dir/ssl" "$ssl_backup_dir" 2>/dev/null || true
+                    fi
                     (cd "$remove_dir" 2>/dev/null && docker compose down 2>/dev/null) || true
                     rm -rf "$remove_dir"
+                    # Restore SSL backup
+                    if [ -d "$ssl_backup_dir" ]; then
+                        mkdir -p "$remove_dir"
+                        mv "$ssl_backup_dir" "$remove_dir/ssl"
+                    fi
                     log_success "Existing installation removed"
                     echo
                     ;;

@@ -214,11 +214,43 @@ get_acme_tls_port() {
     return 0
 }
 
+# Check if a valid certificate for the domain already exists in the SSL directory and is not expiring soon
+has_valid_cert_for_domain() {
+    local domain="$1"
+    local ssl_dir="$2"
+    local cert_file="$ssl_dir/fullchain.crt"
+    local key_file="$ssl_dir/private.key"
+    
+    if [ ! -f "$cert_file" ] || [ ! -f "$key_file" ]; then
+        return 1
+    fi
+    
+    # Check if the domain matches CN or DNS SANs
+    if ! openssl x509 -noout -text -in "$cert_file" 2>/dev/null | grep -q -E "CN\s*=\s*${domain}|DNS:${domain}" 2>/dev/null; then
+        return 1
+    fi
+    
+    # Check status (must have at least 7 days remaining)
+    local status
+    status=$(check_ssl_certificate_status "$ssl_dir" 2>/dev/null || echo "invalid")
+    case "$status" in
+        valid:*|warning:*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 # Issue SSL certificate for domain using TLS-ALPN
 issue_ssl_certificate() {
     local domain="$1"
     local ssl_dir="$2"
     local skip_reload="${3:-false}"  # Skip reload command during initial install
+    
+    if has_valid_cert_for_domain "$domain" "$ssl_dir"; then
+        log_success "Existing valid SSL certificate found for $domain. Reusing it..."
+        return 0
+    fi
     
     log_info "Requesting SSL certificate for $domain..."
     
