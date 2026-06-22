@@ -90,6 +90,7 @@ RANDOMIZE_TEMPLATE=true
 # Use --tcp flag to switch to TCP port
 USE_SOCKET=true
 SOCKET_PATH="/dev/shm/nginx.sock"
+USE_XHTTP=false
 
 # Docker Configuration for Nginx decoy
 CONTAINER_NAME="nginx-selfsteal"
@@ -155,6 +156,7 @@ show_help() {
     echo -e "${WHITE}Options:${NC}"
     printf "   ${CYAN}%-22s${NC} %s\n" "--socket" "Use Unix socket (default)"
     printf "   ${CYAN}%-22s${NC} %s\n" "--tcp" "Use TCP port instead of socket"
+    printf "   ${CYAN}%-22s${NC} %s\n" "--xhttp" "Use VLESS+xHTTP reverse proxy mode (no Reality)"
     printf "   ${CYAN}%-22s${NC} %s\n" "--acme-port <port>" "Custom port for ACME TLS-ALPN"
     printf "   ${CYAN}%-22s${NC} %s\n" "--no-randomize" "Don't mutate templates on install"
     printf "   ${CYAN}%-22s${NC} %s\n" "--test, --staging" "Use Let's Encrypt staging environment"
@@ -247,6 +249,12 @@ while [ $# -gt 0 ]; do
             ;;
         --tcp)
             # Use TCP port instead of Unix socket
+            USE_SOCKET=false
+            shift
+            ;;
+        --xhttp)
+            # Use VLESS+xHTTP behind Nginx (no Reality)
+            USE_XHTTP=true
             USE_SOCKET=false
             shift
             ;;
@@ -1272,8 +1280,8 @@ setup_default_inbound() {
                 return 0
             fi
             
-            local settings_json="{\"clients\":[{\"id\":\"$uuid\",\"flow\":\"xtls-rprx-vision\",\"email\":\"admin@$domain\",\"limitIp\":0,\"totalGB\":0,\"expiryTime\":0}],\"decryption\":\"none\",\"fallbacks\":[]}"
-            local stream_settings_json="{\"network\":\"tcp\",\"security\":\"reality\",\"externalProxy\":[],\"realitySettings\":{\"show\":false,\"xver\":1,\"dest\":\"/dev/shm/nginx.sock\",\"spiderX\":\"/\",\"serverNames\":[\"$domain\"],\"privateKey\":\"$priv_key\",\"minClient\":\"\",\"maxClient\":\"\",\"maxTimediff\":0,\"shortIds\":[\"$short_id\"]},\"tcpSettings\":{\"acceptProxyProtocol\":false,\"header\":{\"type\":\"none\"}}}"
+            local settings_json="{\"clients\":[{\"id\":\"$uuid\",\"flow\":\"\",\"email\":\"admin@$domain\",\"limitIp\":0,\"totalGB\":0,\"expiryTime\":0}],\"decryption\":\"none\",\"fallbacks\":[]}"
+            local stream_settings_json="{\"network\":\"xhttp\",\"security\":\"reality\",\"externalProxy\":[],\"realitySettings\":{\"show\":false,\"xver\":1,\"dest\":\"/dev/shm/nginx.sock\",\"spiderX\":\"/\",\"serverNames\":[\"$domain\"],\"privateKey\":\"$priv_key\",\"minClient\":\"\",\"maxClient\":\"\",\"maxTimediff\":0,\"shortIds\":[\"$short_id\"]},\"xhttpSettings\":{\"mode\":\"auto\",\"host\":\"\",\"path\":\"/\"}}"
             local sniffing_json="{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"],\"metadataOnly\":false,\"routeOnly\":false}"
             
             # Insert inbound record
@@ -1283,10 +1291,13 @@ setup_default_inbound() {
             if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^3xui_app$'; then
                 log_info "Restarting 3xui_app container to apply inbound configuration..."
                 docker restart 3xui_app >/dev/null 2>&1 || true
+                sleep 5
+                log_info "Triggering Xray soft-reload to ensure port bindings..."
+                docker exec 3xui_app x-ui restart-xray >/dev/null 2>&1 || true
             fi
             
             # Save link to config directory
-            local vless_link="vless://$uuid@$domain:443?security=reality&encryption=none&sni=$domain&fp=chrome&pbk=$pub_key&sid=$short_id&spiderX=%2F&flow=xtls-rprx-vision&type=tcp&headerType=none#VLESS-Reality-Selfsteal"
+            local vless_link="vless://$uuid@$domain:443?security=reality&encryption=none&sni=$domain&fp=chrome&pbk=$pub_key&sid=$short_id&spiderX=%2F&type=xhttp&mode=auto&host=$domain&path=%2F#VLESS-Reality-Selfsteal"
             mkdir -p "$APP_DIR"
             echo "$vless_link" > "$APP_DIR/vless.txt"
             log_success "Default VLESS Reality inbound auto-configured!"
