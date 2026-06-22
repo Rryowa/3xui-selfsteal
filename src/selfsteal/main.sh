@@ -1313,118 +1313,10 @@ EOF
     fi
 }
 
-# Helper to automatically setup default VLESS Reality inbound if no inbounds configured
+# Auto-inbound setup removed — manual configuration via 3x-ui panel is more reliable
+# and avoids broken QR codes from mis-matched protocol/security combinations.
 setup_default_inbound() {
-    local domain="$1"
-    
-    [ "$DEBUG_MODE" = true ] && echo "DEBUG: setup_default_inbound started, domain=$domain"
-    
-    local db_file="/opt/3x-ui/db/x-ui.db"
-    if [ -f "$db_file" ] && command -v sqlite3 >/dev/null 2>&1; then
-        local inbound_count
-        inbound_count=$(sqlite3 "$db_file" "SELECT COUNT(*) FROM inbounds;" 2>/dev/null || echo "0")
-        
-        if [ "$inbound_count" = "0" ] || [ -z "$inbound_count" ]; then
-            log_info "No inbounds found in 3x-ui database. Auto-configuring default VLESS inbound..."
-            
-            # Generate random credentials
-            local uuid
-            uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || true)
-            if [ -z "$uuid" ]; then
-                uuid=$(od -x -N 16 /dev/urandom | head -n 1 | awk '{print $2$3"-"$4"-"$5"-"$6"-"$7$8$9}')
-            fi
-            
-            local priv_key=""
-            local pub_key=""
-            local short_id=""
-            if [ "$USE_XHTTP" != true ]; then
-                short_id=$(openssl rand -hex 8 2>/dev/null || od -v -An -N 8 -t x1 /dev/urandom | tr -d ' \n')
-                
-                # Generate Reality keypair via xray container
-                local key_output=""
-                if docker ps -q -f "name=3xui_app" 2>/dev/null | grep -q .; then
-                    key_output=$(docker exec 3xui_app bin/xray-linux-amd64 x25519 2>/dev/null || docker exec 3xui_app xray x25519 2>/dev/null || true)
-                fi
-                
-                if [ -n "$key_output" ]; then
-                    priv_key=$(echo "$key_output" | grep "^PrivateKey:" | awk '{print $NF}')
-                    pub_key=$(echo "$key_output" | grep -E "^(Password \(PublicKey\)|PublicKey):" | awk '{print $NF}')
-                fi
-                
-                if [ -z "$priv_key" ] || [ -z "$pub_key" ]; then
-                    log_warning "Could not auto-generate Reality keypair. Skipping default inbound setup."
-                    log_warning "Try manually: docker exec 3xui_app xray x25519"
-                    return 0
-                fi
-                
-                # Validate pub_key looks like a valid x25519 base64 key (43-44 chars)
-                if [ ${#pub_key} -lt 40 ]; then
-                    log_warning "Generated PublicKey looks invalid (length=${#pub_key}). Skipping default inbound setup."
-                    return 0
-                fi
-            fi
-            
-            local settings_json="{\"clients\":[{\"id\":\"$uuid\",\"flow\":\"\",\"email\":\"admin@$domain\",\"limitIp\":0,\"totalGB\":0,\"expiryTime\":0}],\"decryption\":\"none\",\"fallbacks\":[]}"
-            local sniffing_json="{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"],\"metadataOnly\":false,\"routeOnly\":false}"
-            
-            local remark="VLESS-REALITY"
-            local tag="inbound-443"
-            local listen="0.0.0.0"
-            local bind_port=443
-            local stream_settings_json="{\"network\":\"xhttp\",\"security\":\"reality\",\"externalProxy\":[],\"realitySettings\":{\"show\":false,\"xver\":1,\"dest\":\"/dev/shm/nginx.sock\",\"spiderX\":\"/\",\"serverNames\":[\"$domain\"],\"privateKey\":\"$priv_key\",\"minClient\":\"\",\"maxClient\":\"\",\"maxTimediff\":0,\"shortIds\":[\"$short_id\"]},\"xhttpSettings\":{\"mode\":\"auto\",\"host\":\"\",\"path\":\"/\"}}"
-            
-            if [ "$USE_XHTTP" = true ]; then
-                remark="VLESS-Nginx-XHTTP"
-                tag="inbound-xhttp"
-                listen="127.0.0.1"
-                bind_port="$port"
-                stream_settings_json="{\"network\":\"xhttp\",\"security\":\"none\",\"externalProxy\":[],\"xhttpSettings\":{\"mode\":\"auto\",\"host\":\"\",\"path\":\"/xhttp\",\"xPaddingBytes\":\"100-1000\",\"scMaxBufferedPosts\":30,\"scStreamUpServerSecs\":\"20-80\"}}"
-            fi
-
-            # Ensure client exists in clients table and is synchronized
-            sqlite3 "$db_file" "INSERT OR REPLACE INTO clients (id, email, sub_id, uuid, enable, created_at, updated_at) VALUES (1, 'admin@$domain', '', '$uuid', 1, 0, 0);"
-
-            # Insert inbound record and retrieve newly created ID
-            local inbound_id
-            inbound_id=$(sqlite3 "$db_file" "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, traffic_reset, last_traffic_reset_time, listen, port, protocol, settings, stream_settings, tag, sniffing, node_id, share_addr_strategy, share_addr, origin_node_guid) VALUES (1, 0, 0, 0, '$remark', 1, 0, 'never', 0, '$listen', $bind_port, 'vless', '$settings_json', '$stream_settings_json', '$tag', '$sniffing_json', NULL, 'listen', '', ''); SELECT last_insert_rowid();")
-            
-            if [ -n "$inbound_id" ] && [[ "$inbound_id" =~ ^[0-9]+$ ]]; then
-                log_info "Updating client mappings for inbound ID $inbound_id..."
-                sqlite3 "$db_file" "INSERT OR IGNORE INTO client_inbounds (client_id, inbound_id, flow_override, created_at) VALUES (1, $inbound_id, '', 0);"
-                sqlite3 "$db_file" "INSERT INTO client_traffics (inbound_id, enable, email, up, down, expiry_time, total, reset, last_online) VALUES ($inbound_id, 1, 'admin@$domain', 0, 0, 0, 0, 0, 0);"
-            else
-                log_warning "Could not retrieve auto-created inbound ID. Client mappings not updated."
-            fi
-            
-            # Restart 3x-ui container to apply inbound
-            if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^3xui_app$'; then
-                log_info "Restarting 3xui_app container to apply inbound configuration..."
-                docker restart 3xui_app >/dev/null 2>&1 || true
-                sleep 5
-                log_info "Triggering Xray soft-reload to ensure port bindings..."
-                docker exec 3xui_app x-ui restart-xray >/dev/null 2>&1 || true
-            fi
-            
-            # Save link to config directory
-            local vless_link
-            if [ "$USE_XHTTP" = true ]; then
-                vless_link="vless://$uuid@$domain:443?security=tls&encryption=none&sni=$domain&type=xhttp&mode=auto&host=$domain&path=%2Fxhttp#VLESS-Nginx-XHTTP"
-            else
-                vless_link="vless://$uuid@$domain:443?security=reality&encryption=none&sni=$domain&fp=chrome&pbk=$pub_key&sid=$short_id&spiderX=%2F&type=xhttp&mode=auto&host=$domain&path=%2F#VLESS-Reality-Selfsteal"
-            fi
-            mkdir -p "$APP_DIR"
-            echo "$vless_link" > "$APP_DIR/vless.txt"
-            
-            if [ "$USE_XHTTP" = true ]; then
-                log_success "Default VLESS xHTTP Nginx inbound auto-configured!"
-            else
-                log_success "Default VLESS Reality inbound auto-configured!"
-            fi
-            
-            log_info "Import the link above into your client (v2rayN, sing-box, Mihomo, NekoBox, v2rayNG)."
-            log_info "Enable Mux/XMUX in client settings to force single-socket mode."
-        fi
-    fi
+    return 0
 }
 
 # Install function
@@ -1829,8 +1721,7 @@ install_command() {
 
 
 
-    # Automatically set up VLESS Reality inbound if no inbounds configured
-    setup_default_inbound "$domain"
+    # Auto-inbound setup removed — configure via 3x-ui panel for reliable QR codes
 
     # Installation complete
     echo
@@ -1857,28 +1748,38 @@ install_command() {
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Installed Template:" "$installed_template"
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Management Command:" "$APP_NAME"
     
-    if [ -f "$APP_DIR/vless.txt" ]; then
-        local vless_link
-        vless_link=$(cat "$APP_DIR/vless.txt")
-        printf "   ${WHITE}%-20s${NC} ${GREEN}%s${NC}\n" "VLESS Reality Link:" "$vless_link"
-        printf "   ${WHITE}%-20s${NC} ${YELLOW}%s${NC}\n" "Mux Advisory:" "Enable Mux/XMUX in client for single-socket mode"
-    fi
+    echo -e "   ${CYAN}ℹ️  Configure your VLESS inbound via the 3x-ui panel (port 8443)${NC}"
     echo
     echo
-    echo -e "${WHITE}📋 Next Steps:${NC}"
-    echo -e "${GRAY}   • Configure your Xray Reality with:${NC}"
-    echo -e "${GRAY}     - serverNames: [\"$domain\"]${NC}"
+    echo -e "${WHITE}📋 Next Steps — add an inbound in 3x-ui panel (port 8443):${NC}"
+    echo -e "${GRAY}$(printf '─%.0s' $(seq 1 50))${NC}"
+    echo
+    echo -e "${CYAN}  Option A — VLESS + Reality (recommended for domestic hops):${NC}"
+    echo -e "${GRAY}    Protocol : VLESS${NC}"
+    echo -e "${GRAY}    Port     : 443  (or any high port, e.g. 47000)${NC}"
+    echo -e "${GRAY}    Network  : TCP${NC}"
+    echo -e "${GRAY}    Security : Reality${NC}"
+    echo -e "${GRAY}    Flow     : xtls-rprx-vision${NC}"
     if [ "$USE_SOCKET" = true ]; then
-        echo -e "${CYAN}     - target: \"$SOCKET_PATH\"${NC}"
+        echo -e "${GRAY}    Dest/SNI : $SOCKET_PATH  (xver 1)${NC}"
     else
-        echo -e "${CYAN}     - target: \"127.0.0.1:$port\"${NC}"
+        echo -e "${GRAY}    Dest     : 127.0.0.1:$port  (xver 1)${NC}"
     fi
-    echo -e "${CYAN}     - xver: 1${NC}"
-    echo -e "${YELLOW}     - Reality Port Recommendation: Use high port (e.g. 47000+)${NC}"
-    echo -e "${GRAY}   • Change template: $APP_NAME template${NC}"
-    echo -e "${GRAY}   • Customize HTML content in: $HTML_DIR${NC}"
-    echo -e "${GRAY}   • Check status: $APP_NAME status${NC}"
-    echo -e "${GRAY}   • View logs: $APP_NAME logs${NC}"
+    echo -e "${GRAY}    serverNames: [\"$domain\"]${NC}"
+    echo
+    echo -e "${CYAN}  Option B — VLESS + xHTTP behind Nginx (cross-border hops):${NC}"
+    echo -e "${GRAY}    Protocol : VLESS${NC}"
+    echo -e "${GRAY}    Port     : 127.0.0.1:47443 (loopback only)${NC}"
+    echo -e "${GRAY}    Network  : xHTTP   (path: /xhttp)${NC}"
+    echo -e "${GRAY}    Security : none (Nginx handles TLS on port 443)${NC}"
+    echo -e "${GRAY}    SNI tip  : set $domain in Nginx proxy_pass${NC}"
+    echo
+    echo -e "${YELLOW}  ⚠️  Enable Mux/XMUX in your client to stay under the 3-parallel-conn DPI limit${NC}"
+    echo
+    echo -e "${GRAY}   • Change template  : $APP_NAME template${NC}"
+    echo -e "${GRAY}   • Customize HTML   : $HTML_DIR${NC}"
+    echo -e "${GRAY}   • Check status     : $APP_NAME status${NC}"
+    echo -e "${GRAY}   • View logs        : $APP_NAME logs${NC}"
     echo -e "${GRAY}$(printf '─%.0s' $(seq 1 50))${NC}"
 }
 
