@@ -1063,8 +1063,90 @@ EOF
 
     log_success "nginx.conf created"
 
-    # Create site configuration based on socket or TCP mode
-    if [ "$USE_SOCKET" = true ]; then
+    # Create site configuration based on socket, TCP, or xHTTP mode
+    if [ "$USE_XHTTP" = true ]; then
+        # VLESS-xHTTP reverse proxy configuration
+        cat > "$APP_DIR/conf.d/selfsteal.conf" << EOF
+# HTTP server - redirect and ACME challenge
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name $domain;
+    
+    # ACME challenge for Let's Encrypt certificate renewal
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+        try_files \$uri =404;
+    }
+    
+    # Redirect all other traffic to HTTPS
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+# HTTPS server - Nginx on port 443 with TLS termination
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name $domain;
+
+    # SSL Configuration with ACME certificates
+    ssl_certificate /etc/nginx/ssl/fullchain.crt;
+    ssl_certificate_key /etc/nginx/ssl/private.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # OCSP Stapling (faster TLS handshake)
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    resolver 1.1.1.1 8.8.8.8 valid=300s;
+    resolver_timeout 5s;
+
+    # Logging
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log warn;
+
+    # Root directory for decoy site
+    root /var/www/html;
+    index index.html index.htm;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # VLESS-XHTTP routing location block
+    location /xhttp {
+        proxy_redirect off;
+        proxy_pass http://127.0.0.1:$port;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$http_host;
+        # Show real client IP in Xray
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    }
+
+    # Standard decoy location block
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    # Cache static files
+    location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+}
+EOF
+        log_success "Nginx site configuration created (VLESS-xHTTP reverse proxy)"
+    elif [ "$USE_SOCKET" = true ]; then
         # Unix socket configuration for Xray Reality
         cat > "$APP_DIR/conf.d/selfsteal.conf" << EOF
 # HTTP server - redirect and ACME challenge
