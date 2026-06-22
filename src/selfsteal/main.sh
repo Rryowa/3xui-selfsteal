@@ -1364,7 +1364,7 @@ install_command() {
                     local remove_dir="/opt/nginx-selfsteal"
                     
                     # Check for unexpected files before removal
-                    local expected_files="docker-compose.yml|\.env|nginx\.conf|html|logs|ssl|conf\.d"
+                    local expected_files="docker-compose.yml|\.env|nginx\.conf|html|logs|ssl|conf\.d|vless\.txt|acme-renew\.sh"
                     local unexpected_files=$(find "$remove_dir" -maxdepth 1 -type f -o -type d | grep -v "^$remove_dir$" | xargs -I{} basename {} | grep -vE "^($expected_files)$" 2>/dev/null)
                     
                     if [ -n "$unexpected_files" ]; then
