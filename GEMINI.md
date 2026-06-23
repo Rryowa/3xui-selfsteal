@@ -69,9 +69,27 @@ If a user cannot load legitimate sites hosted on blocked subnets:
 *   Enable **Cryptography Compliance (CNSA)** (`#cryptography-compliance-cnsa`).
 *   This shifts the cipher sorting to prioritize NSA-compliant suites, altering Chrome's ClientHello signature and bypassing the block.
 
-### B. VLESS Client Mux Tuning
-*   VLESS clients by default open parallel connection pools on startup, triggering the parallel handshake count (>3).
-*   **Fix:** Enable **Mux** or **XMUX** inside your VLESS client settings. This forces all traffic through a single TCP socket.
-
-### C. Blank SNI
+### B. Blank SNI
 *   Leaving the SNI blank or removing it from the TLS handshake bypasses the behavioral counters on some ISPs, since the rule relies on tracking traffic patterns per SNI.
+
+---
+
+## 6. Architectural Rules & Anti-Patterns (Golden Rules)
+To prevent recurrent misconfigurations, adhere strictly to these architectural boundaries:
+
+### Rule 1: Never Mix Reality and xHTTP
+*   **Anti-Pattern:** Attempting to configure an inbound with `network: xhttp` and `security: reality` on the same port.
+*   **Why:** They inherently conflict over port 443 ownership. 
+    *   **Reality** requires Xray to bind to port 443 and terminate the TLS handshake itself, proxying unauthorized traffic to Nginx.
+    *   **xHTTP** behind Nginx requires Nginx to bind to port 443, terminate TLS, and proxy the `/xhttp` path back to Xray. 
+
+### Rule 2: Nginx xHTTP Reverse Proxy Requires `grpc_pass`
+*   **Anti-Pattern:** Using `proxy_pass http://127.0.0.1:port` or `Upgrade: websocket` headers for the `/xhttp` location block.
+*   **Why:** xHTTP relies heavily on HTTP/2 multiplexing and chunked streaming. `proxy_pass http://` forces a downgrade to HTTP/1.1, destroying native multiplexing. Fake WebSocket upgrade headers break the stream. 
+*   **Fix:** Always use `grpc_pass grpc://` (or `unix:` socket) to natively handle HTTP/2 framing, and disable buffering.
+*   **Critical Directives:** Nginx must include `client_max_body_size 0;` (to prevent Nginx from abruptly killing large upload streams) and extended timeouts (`client_body_timeout 5m; grpc_read_timeout 315s;`).
+
+### Rule 3: Do Not Rely on Mux/XMUX for DPI Evasion
+*   **Anti-Pattern:** Advising users to simply "Enable Mux/XMUX" in standard VLESS clients to bypass the 3-parallel-connection Siberian Block.
+*   **Why:** Outer Mux layers can leak recognizable protocol signatures. 
+*   **Fix:** For bulletproof connections, rely on xHTTP's native internal `xmux` properties, randomized chunking (`uplinkChunkSize`, `scMaxEachPostBytes`), and forced artificial delays (`scMinPostsIntervalMs`) as documented in `docs/xhttp-bulletproof-config.md`.
