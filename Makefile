@@ -1,4 +1,4 @@
-.PHONY: build run clean install-sysprep install-3x-ui install-selfsteal install-netbird install-all
+.PHONY: build run clean install-sysprep install-3x-ui install-selfsteal install-netbird install-all test
 
 build: src/dest/selfsteal.sh src/dest/3x-ui-docker.sh
 
@@ -25,13 +25,19 @@ sysprep:
 	@bash ./sysprep.sh
 
 3x-ui: build
+	@rm -f /dev/shm/nginx-xhttp.socket
 	@./src/dest/3x-ui-docker.sh $(ARGS)
 
 selfsteal: build
+	@rm -f /dev/shm/nginx-xhttp.socket
 	@./src/dest/selfsteal.sh install $(ARGS)
 
 netbird:
 	@bash ./netbird.sh menu
 
+test:
+	@bash ./tests/run_tests.sh
+
 all: 3x-ui selfsteal
+
 

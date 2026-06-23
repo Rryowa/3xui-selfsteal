@@ -1081,7 +1081,7 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
 
     # VLESS-XHTTP routing location block (Aligned with official XTLS/Xray-examples)
-    location /api/v1/assets/logo.png {
+    location ^~ /api/v1/assets/logo.png {
         # xHTTP streams chunks over HTTP/2, client_max_body_size 0 is CRITICAL to prevent Nginx from killing large streams
         client_max_body_size 0;
         
@@ -1091,6 +1091,7 @@ server {
         grpc_send_timeout 5m;
         
         grpc_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        grpc_set_header Host \$host;
         
         # Use grpc_pass to natively handle HTTP/2 multiplexing (xHTTP over H2)
         # Binds to Unix Socket for zero-overhead internal routing
@@ -1578,8 +1579,44 @@ install_command() {
     fi
 
 
+    # Auto-configure inbound in 3x-ui database
+    log_info "Auto-configuring VLESS-xHTTP inbound in 3x-ui..."
+    local db_path="/opt/3x-ui/db/x-ui.db"
+    if [ -f "$db_path" ] && command -v sqlite3 >/dev/null 2>&1; then
+        local client_uuid
+        client_uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "aa89d5c2-1ca0-4cfb-b444-dcdaa03de549")
+        
+        # Prepare settings and streamSettings JSON with domain and uuid
+        local settings_json="{\"clients\":[{\"id\":\"$client_uuid\",\"email\":\"user-xhttp\",\"subId\":\"userrxhttpsubid1\",\"enable\":true,\"flow\":\"\"}],\"decryption\":\"none\",\"fallbacks\":[]}"
+        local stream_settings_json="{\"network\":\"xhttp\",\"security\":\"none\",\"sockopt\":{\"tcpFastOpen\":true,\"tcpKeepAliveInterval\":15,\"tproxy\":\"off\",\"tcpcongestion\":\"bbr\",\"tcpKeepAliveIdle\":15,\"tcpMaxSeg\":1440,\"tcpUserTimeout\":10000},\"xhttpSettings\":{\"enableXmux\":true,\"path\":\"/api/v1/assets/logo.png\",\"host\":\"$domain\",\"mode\":\"packet-up\",\"scMaxBufferedPosts\":30,\"noSSEHeader\":true,\"noGRPCHeader\":true,\"xPaddingBytes\":\"100-800\",\"xPaddingObfsMode\":true,\"scMaxEachPostBytes\":\"10000-30000\",\"scMinPostsIntervalMs\":\"20-30\",\"scStreamUpServerSecs\":\"45-90\",\"uplinkChunkSize\":4000,\"sessionIDPlacement\":\"header\",\"sessionIDKey\":\"X-Session-Id\",\"xmux\":{\"maxConcurrency\":\"16\",\"hMaxReusableSecs\":\"300\"}}}"
 
-    # Auto-inbound setup removed — configure via 3x-ui panel for reliable QR codes
+        # Clean old DB records and insert new config
+        sqlite3 "$db_path" <<EOF
+DELETE FROM inbounds WHERE id = 1 OR remark = 'xhttp-inbound';
+DELETE FROM clients WHERE email = 'user-xhttp';
+DELETE FROM client_traffics WHERE email = 'user-xhttp';
+DELETE FROM client_inbounds WHERE inbound_id = 1;
+DELETE FROM hosts WHERE inbound_id = 1;
+
+INSERT INTO inbounds (id, user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing, last_traffic_reset_time, sub_sort_index)
+VALUES (1, 1, 0, 0, 0, 'xhttp-inbound', 1, 0, '/dev/shm/nginx-xhttp.socket,0666', 443, 'vless', '$settings_json', '$stream_settings_json', 'inbound-xhttp', '{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":false}', 0, 0);
+
+INSERT INTO clients (id, email, sub_id, uuid, password, auth, flow, security, reverse, limit_ip, total_gb, expiry_time, enable, tg_id, group_name, comment, reset, created_at, updated_at)
+VALUES (1, 'user-xhttp', 'userrxhttpsubid1', '$client_uuid', '', '', '', '', '', 0, 0, 0, 1, 0, '', '', 0, strftime('%s','now')*1000, strftime('%s','now')*1000);
+
+INSERT INTO client_inbounds (client_id, inbound_id, flow_override, created_at)
+VALUES (1, 1, '', strftime('%s','now')*1000);
+
+INSERT INTO hosts (inbound_id, remark, address, port, security, sni, host_header, path, created_at, updated_at)
+VALUES (1, 'main', '$domain', 443, 'tls', '$domain', '', '', strftime('%s','now')*1000, strftime('%s','now')*1000);
+EOF
+        # Clean socket file and trigger 3x-ui to reload config/restart xray
+        rm -f /dev/shm/nginx-xhttp.socket
+        docker restart 3xui_app >/dev/null 2>&1 || true
+        log_success "3x-ui VLESS-xHTTP inbound configured automatically!"
+    else
+        log_warning "Could not auto-configure 3x-ui inbound (sqlite3 or database missing)"
+    fi
 
     # Installation complete
     echo

@@ -6,12 +6,17 @@ XHTTP_JSON_TEMPLATE='{
   "enable": true,
   "expiryTime": 0,
   "listen": "/dev/shm/nginx-xhttp.socket,0666",
-  "port": 0,
+  "port": 443,
+  "shareAddrStrategy": "custom",
+  "shareAddr": "filecloud.rryowa.com",
   "protocol": "vless",
   "settings": {
     "clients": [
       {
         "id": "<YOUR_USER_UUID>",
+        "email": "user-xhttp",
+        "subId": "userrxhttpsubid1",
+        "enable": true,
         "flow": ""
       }
     ],
@@ -24,37 +29,31 @@ XHTTP_JSON_TEMPLATE='{
     "sockopt": {
       "tcpFastOpen": true,
       "tcpKeepAliveInterval": 15,
-      "tproxy": "off"
+      "tproxy": "off",
+      "tcpcongestion": "bbr",
+      "tcpKeepAliveIdle": 15,
+      "tcpMaxSeg": 1440,
+      "tcpUserTimeout": 10000
     },
-    "externalProxy": [
-      {
-        "forceTls": "tls",
-        "dest": "filecloud.rryowa.com",
-        "port": 443,
-        "remark": "main"
-      }
-    ],
     "xhttpSettings": {
+      "enableXmux": true,
       "path": "/api/v1/assets/logo.png",
       "host": "filecloud.rryowa.com",
       "mode": "packet-up",
       "scMaxBufferedPosts": 30,
-      "extra": {
-        "noSSEHeader": true,
-        "noGRPCHeader": true,
-        "xPaddingBytes": "100-800",
-        "xPaddingObfsMode": true,
-        "scMaxEachPostBytes": "10000-30000",
-        "scMinPostsIntervalMs": "20-30",
-        "scStreamUpServerSecs": "45-90",
-        "uplinkChunkSize": "2000-8000",
-        "sessionPlacement": "header",
-        "sessionKey": "X-Session-Id",
-        "xmux": {
-          "maxConnections": 8,
-          "maxConcurrency": 16,
-          "hMaxReusableSecs": 300
-        }
+      "noSSEHeader": true,
+      "noGRPCHeader": true,
+      "xPaddingBytes": "100-800",
+      "xPaddingObfsMode": true,
+      "scMaxEachPostBytes": "10000-30000",
+      "scMinPostsIntervalMs": "20-30",
+      "scStreamUpServerSecs": "45-90",
+      "uplinkChunkSize": 4000,
+      "sessionIDPlacement": "header",
+      "sessionIDKey": "X-Session-Id",
+      "xmux": {
+        "maxConcurrency": "16",
+        "hMaxReusableSecs": "300"
       }
     }
   },

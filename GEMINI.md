@@ -2,12 +2,18 @@
 
 This document is compiled as an automated developer onboarding guide and a quick-reference knowledge base. It details what this project is, how it functions, and the technical insights regarding bypass architectures for Deep Packet Inspection (DPI) censorship (specifically targeted at the Russian TSPU restrictions of June 2026).
 
+## References
+https://github.com/XTLS/Xray-core
+https://github.com/MHSanaei/3x-ui
+https://github.com/mozaroc/x-ui-pro
+https://github.com/XTLS/Xray-examples
+
 ---
 
 ## 🛑 AI AGENT INSTRUCTION: The Local Knowledge Base
 As an AI agent, you do not automatically read every file in this repository on startup due to context limits. However, you **MUST** actively use your `grep_search` and `view_file` tools to consult the local knowledge base before writing or modifying any Xray configurations.
 
-The local knowledge base is located in the `docs/` folder:
+The local knowledge base is located in the `docs/` folder, if something is missing from Reference links above - clone  it into docs/:
 1.  **`docs/references/Xray-docs/`**: A full clone of the official `XTLS/Xray-docs-next` repository. Search this for parameter schemas and official syntax.
 2.  **`docs/references/Xray-examples/`**: A full clone of the official `XTLS/Xray-examples` repository. 
 3.  **`docs/references/3x-ui/`**: A full clone of the `MHSanaei/3x-ui` repository. Search this for panel-specific configuration schemas and UI variables.
