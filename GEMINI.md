@@ -10,7 +10,9 @@ As an AI agent, you do not automatically read every file in this repository on s
 The local knowledge base is located in the `docs/` folder:
 1.  **`docs/references/Xray-docs/`**: A full clone of the official `XTLS/Xray-docs-next` repository. Search this for parameter schemas and official syntax.
 2.  **`docs/references/Xray-examples/`**: A full clone of the official `XTLS/Xray-examples` repository. 
-3.  **`docs/verified-examples/`**: This directory contains real-world, battle-tested configurations provided by the user that are proven to bypass current DPI. **These verified examples take absolute precedence over online AI training data.**
+3.  **`docs/references/3x-ui/`**: A full clone of the `MHSanaei/3x-ui` repository. Search this for panel-specific configuration schemas and UI variables.
+4.  **`docs/references/x-ui-pro/`**: A full clone of the `mozaroc/x-ui-pro` repository. Search this for verified architectural setups and proxy installation logic.
+5.  **`docs/verified-examples/`**: This directory contains real-world, battle-tested configurations provided by the user that are proven to bypass current DPI. **These verified examples take absolute precedence over online AI training data.**
 
 ---
 This repository is a containerized infrastructure suite designed to deploy stealthy proxy panels and VPN nodes using Docker. 

@@ -2,9 +2,12 @@
 
 build: src/dest/selfsteal.sh src/dest/3x-ui-docker.sh
 
-src/dest/selfsteal.sh: src/selfsteal/main.sh src/build.sh $(shell find src/selfsteal src/common -type f -name '*.sh')
+src/dest/selfsteal.sh: src/selfsteal/main.sh src/build.sh xhttp-client-import.json $(shell find src/selfsteal src/common -type f -name '*.sh')
 	@mkdir -p src/dest
 	@echo "Building src/dest/selfsteal.sh..."
+	@echo -n "XHTTP_JSON_TEMPLATE='" > src/selfsteal/xhttp_template.sh
+	@cat xhttp-client-import.json >> src/selfsteal/xhttp_template.sh
+	@echo "'" >> src/selfsteal/xhttp_template.sh
 	@bash src/build.sh src/selfsteal/main.sh > src/dest/selfsteal.sh
 	@chmod +x src/dest/selfsteal.sh
 

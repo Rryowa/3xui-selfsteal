@@ -12,16 +12,17 @@
 # the local image with no further registry I/O.
 DOCKER_HUB_MIRRORS=("mirror.gcr.io" "dockerhub.timeweb.cloud" "huecker.io" "cr.yandex/mirror")
 
-# ensure_image <bare-ref>   e.g. nginx:1.29.3-alpine
+# ensure_image <bare-ref> [force_pull]   e.g. nginx:1.29.3-alpine
 # Guarantees the bare ref exists locally. Returns 0 on success, 1 if the image
 # cannot be obtained from Docker Hub or any mirror.
 ensure_image() {
     local ref="$1"
+    local force_pull="${2:-false}"
     local repo="${ref%%:*}"
     local tag="${ref##*:}"
 
-    # 0) Already present locally — nothing to do (idempotent, no network).
-    if docker image inspect "$ref" >/dev/null 2>&1; then
+    # 0) Already present locally (and not forcing a pull) — nothing to do.
+    if [ "$force_pull" != "true" ] && docker image inspect "$ref" >/dev/null 2>&1; then
         return 0
     fi
 
@@ -73,5 +74,6 @@ ensure_image() {
 
 # Ensure the image for the currently selected web server is present locally.
 ensure_runtime_image() {
-    ensure_image "nginx:${NGINX_VERSION}"
+    local force_pull="${1:-false}"
+    ensure_image "nginx:${NGINX_VERSION}" "$force_pull"
 }

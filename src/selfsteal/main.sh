@@ -137,6 +137,7 @@ source src/common/logging.sh
 source src/common/docker.sh
 source src/selfsteal/acme.sh
 source src/selfsteal/socket.sh
+source src/selfsteal/xhttp_template.sh
 
 source src/common/firewall.sh
 
@@ -1549,7 +1550,7 @@ install_command() {
 
     # Ensure the runtime image is available (Docker Hub rate-limit / RU-block
     # resilient) so `docker compose up` reuses a local image instead of pulling.
-    ensure_runtime_image || log_warning "Could not pre-fetch image; 'docker compose up' will attempt its own pull"
+    ensure_runtime_image true || log_warning "Could not pre-fetch image; 'docker compose up' will attempt its own pull"
     if docker compose up -d; then
         log_success "$server_display_name services started successfully"
     else
@@ -1629,26 +1630,14 @@ install_command() {
     echo -e "${GRAY}    Listen   : /dev/shm/nginx-xhttp.socket,0666${NC}"
     echo -e "${GRAY}    Port     : 0${NC}"
     echo
-    echo -e "${WHITE}  Paste this in \"Stream Settings\" -> \"Advanced\" -> \"JSON\":${NC}"
-    echo -e "${GRAY}  {"
-    echo -e "    \"network\": \"xhttp\","
-    echo -e "    \"security\": \"none\","
-    echo -e "    \"externalProxy\": ["
-    echo -e "      {"
-    echo -e "        \"forceTls\": \"tls\","
-    echo -e "        \"dest\": \"$domain\","
-    echo -e "        \"port\": 443,"
-    echo -e "        \"remark\": \"main\""
-    echo -e "      }"
-    echo -e "    ],"
-    echo -e "    \"xhttpSettings\": {"
-    echo -e "      \"path\": \"/api/v1/assets/logo.png\","
-    echo -e "      \"host\": \"$domain\","
-    echo -e "      \"scMaxBufferedPosts\": 30,"
-    echo -e "      \"scMaxEachPostBytes\": \"1000000\","
-    echo -e "      \"mode\": \"packet-up\""
-    echo -e "    }"
-    echo -e "  }${NC}"
+    
+    local client_uuid
+    client_uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "aa89d5c2-1ca0-4cfb-b444-dcdaa03de549")
+    local resolved_json="${XHTTP_JSON_TEMPLATE//filecloud.rryowa.com/$domain}"
+    resolved_json="${resolved_json//<YOUR_USER_UUID>/$client_uuid}"
+
+    echo -e "${WHITE}  Copy and paste this in 3x-ui using \"Import Inbound\" (Recommended):${NC}"
+    echo -e "${GRAY}${resolved_json}${NC}"
     echo
 
     echo -e "${GRAY}   • Change template  : $APP_NAME template${NC}"

@@ -554,6 +554,8 @@ fi
 
 cd /opt/3x-ui
 if command -v docker >/dev/null 2>&1; then
+    colorized_echo blue "Pulling latest Docker images for 3x-ui..."
+    $COMPOSE pull || true
     # Start 3x-ui first to initialize DB
     colorized_echo blue "Starting 3x-ui container..."
     $COMPOSE up -d 3xui
