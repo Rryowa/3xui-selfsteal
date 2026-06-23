@@ -38,8 +38,9 @@ graph LR
 
 ### The Logic Behind the Hop Division:
 *   **Domestic Hop (User ➔ VPS1):** Since traffic remains inside the country, it is not subjected to border-level filters. It uses **VLESS + TCP + xtls-rpx-vision**, which has minimal CPU overhead and excellent latency.
-*   **Cross-Border Hop (VPS1 ➔ VPS2):** This segment crosses the international border, where the heaviest DPI rules reside. It uses **VLESS + xHTTP** (formerly `SplitHTTP`), which chunks TCP/UDP proxy data into discrete HTTP/2 or HTTP/3 request-response streams. To a DPI firewall, this traffic is indistinguishable from standard API calls or browsing activities.
+*   **Cross-Border Hop (VPS1 ➔ VPS2):** This segment crosses the international border, where the heaviest DPI rules reside. It uses **VLESS + xHTTP** (formerly `SplitHTTP`), which chunks TCP/UDP proxy data into discrete HTTP/2 or HTTP/3 request-response streams. To a DPI firewall, this traffic is indistinguishable from standard API calls or browsing activities. For a deep-dive into the configuration settings required, see the [xHTTP Bulletproof Configuration Guide](docs/xhttp-bulletproof-config.md).
 *   **Routing:** The bridge server (VPS1) runs 3x-ui and uses Xray routing rules to bind the incoming `user-inbound` traffic directly to the `vps2-outbound` interface.
+
 
 ---
 
@@ -91,11 +92,7 @@ For users who cannot open legitimate web resources hosted on Selectel/TimeWeb du
 2.  Search for **Cryptography Compliance (CNSA)** (`#cryptography-compliance-cnsa`) and set it to **Enabled**.
 3.  This forces Chrome to prioritize NSA-standard ciphers, reshuffling the ClientHello fingerprint so that the TSPU no longer recognizes it as a blocked "Google Chrome" pattern.
 
-### B. VLESS Client Connection Tuning (Mux / XMUX)
-*   Standard VLESS clients open connection pools on start. To avoid triggering the "3 parallel connections" limit, users must enable **Mux** or **XMUX** in their GUI clients (such as sing-box, Nekobox, or v2rayNG).
-*   Mux multiplexes all user traffic over a single TCP socket, preventing connection spikes.
-
-### C. Blank SNI
+### B. Blank SNI
 *   TSPU rules rely on parsing the Server Name Indication (SNI) string. In configurations where an **empty/blank SNI** can be passed (or where direct routing does not require SNI mapping), the filter rules fail to evaluate the parallel handshake counter, bypassing the block.
 
 ---
