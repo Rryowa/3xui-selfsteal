@@ -156,7 +156,7 @@ configure_3xui_socket() {
     echo -e "${GRAY}───────────────────────────────────────${NC}"
     
     # Only relevant for socket mode
-    if [ "$USE_SOCKET" != true ]; then
+    if false; then
         echo -e "${GRAY}   ℹ️  TCP mode - socket configuration not needed${NC}"
         return 0
     fi

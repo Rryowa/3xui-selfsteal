@@ -14,24 +14,21 @@ src/dest/3x-ui-docker.sh: src/3x-ui-docker/main.sh src/build.sh
 	@bash src/build.sh src/3x-ui-docker/main.sh > src/dest/3x-ui-docker.sh
 	@chmod +x src/dest/3x-ui-docker.sh
 
-run: build
-	@./src/dest/selfsteal.sh $(ARGS)
-
 clean:
 	@rm -rf src/dest
 	@rm -f selfsteal.sh
 
-install-sysprep:
+sysprep:
 	@bash ./sysprep.sh
 
-install-3x-ui: build
+3x-ui: build
 	@./src/dest/3x-ui-docker.sh $(ARGS)
 
-install-selfsteal: build
+selfsteal: build
 	@./src/dest/selfsteal.sh install $(ARGS)
 
-install-netbird:
+netbird:
 	@bash ./netbird.sh menu
 
-install-all: install-sysprep install-3x-ui install-selfsteal
+all: 3x-ui selfsteal
 

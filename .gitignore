@@ -1,4 +1,5 @@
 .idea/*
 .worktrees/
 src/dest/
+docs/references/*
 selfsteal.sh

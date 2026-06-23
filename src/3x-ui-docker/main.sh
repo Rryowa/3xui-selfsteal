@@ -505,7 +505,7 @@ if [ "$SECURE_PANEL" = true ]; then
     cat << 'DOCKER' > /opt/3x-ui/docker-compose.yml
 services:
   3xui:
-    image: ghcr.io/mhsanaei/3x-ui:v3.3.1
+    image: ghcr.io/mhsanaei/3x-ui:latest
     container_name: 3xui_app
     network_mode: host
     restart: unless-stopped
@@ -535,7 +535,7 @@ else
     cat << 'DOCKER' > /opt/3x-ui/docker-compose.yml
 services:
   3xui:
-    image: ghcr.io/mhsanaei/3x-ui:v3.3.1
+    image: ghcr.io/mhsanaei/3x-ui:latest
     container_name: 3xui_app
     network_mode: host
     restart: unless-stopped

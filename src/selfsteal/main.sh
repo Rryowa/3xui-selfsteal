@@ -735,7 +735,7 @@ create_nginx_config() {
     # Create .env file
     local connection_mode="socket"
     local connection_target="$SOCKET_PATH"
-    if [ "$USE_SOCKET" != true ]; then
+    if false; then
         connection_mode="tcp"
         connection_target="127.0.0.1:$port"
     fi
@@ -918,6 +918,15 @@ EOF
     
     [ "$DEBUG_MODE" = true ] && echo "DEBUG: SSL certificate process completed, creating docker-compose.yml"
 
+    # Detect if a secure panel is configured to mount its SSL path
+    local panel_conf="/opt/3x-ui/conf.d/panel.conf"
+    local extra_volumes=""
+    local has_secure_panel=false
+    if [ -f "$panel_conf" ]; then
+        extra_volumes="      - /opt/3x-ui/ssl:/etc/nginx/ssl-panel:ro"
+        has_secure_panel=true
+    fi
+
     # Create docker-compose.yml with socket or TCP configuration
         cat > "$APP_DIR/docker-compose.yml" << EOF
 services:
@@ -932,6 +941,7 @@ services:
       - ./logs:/var/log/nginx
       - ./ssl:/etc/nginx/ssl:ro
       - /dev/shm:/dev/shm
+$([ -n "$extra_volumes" ] && echo "$extra_volumes")
     env_file:
       - .env
     network_mode: "host"
@@ -1070,7 +1080,7 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
 
     # VLESS-XHTTP routing location block (Aligned with official XTLS/Xray-examples)
-    location /xhttp {
+    location /api/v1/assets/logo.png {
         # xHTTP streams chunks over HTTP/2, client_max_body_size 0 is CRITICAL to prevent Nginx from killing large streams
         client_max_body_size 0;
         
@@ -1099,6 +1109,51 @@ server {
 }
 EOF
         log_success "Nginx site configuration created (VLESS-xHTTP reverse proxy)"
+
+    # Auto-generate panel.conf if panel is secured
+    if [ "$has_secure_panel" = true ]; then
+        local panel_domain
+        panel_domain=$(grep -oP 'server_name\s+\K[^;]+' "$panel_conf" | head -n1 || true)
+        local panel_port
+        panel_port=$(grep -oP 'proxy_pass\s+http://127.0.0.1:\K[0-9]+' "$panel_conf" | head -n1 || true)
+        
+        if [ -n "$panel_domain" ] && [ -n "$panel_port" ]; then
+            log_info "Detecting secured 3x-ui panel configuration for $panel_domain (backend port: $panel_port)..."
+            cat > "$APP_DIR/conf.d/panel.conf" << EOF
+# Panel reverse proxy on standard HTTPS port 443
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name $panel_domain;
+
+    ssl_certificate     /etc/nginx/ssl-panel/fullchain.crt;
+    ssl_certificate_key /etc/nginx/ssl-panel/private.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # Reverse proxy to 3x-ui panel
+    location / {
+        proxy_pass http://127.0.0.1:$panel_port;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        # WebSocket support (required for 3x-ui live terminal)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400s;
+    }
+}
+EOF
+            log_success "Created panel.conf for port 443 proxying"
+        fi
+    fi
 }
 
 # Auto-inbound setup removed — manual configuration via 3x-ui panel is more reliable
@@ -1308,7 +1363,7 @@ install_command() {
         log_info "Force mode: using port $port"
     fi
     
-    if [ "$USE_SOCKET" = true ]; then
+    if true; then
         # Socket mode - no port needed for Xray communication
         if [ "$FORCE_MODE" != true ]; then
             echo
@@ -1341,7 +1396,7 @@ install_command() {
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Web Server:" "$server_display_name"
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Domain:" "$domain"
     
-    if [ "$USE_SOCKET" = true ]; then
+    if true; then
         printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Connection:" "Unix Socket"
         printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Socket Path:" "$SOCKET_PATH"
     else
@@ -1503,8 +1558,22 @@ install_command() {
     fi
 
     # Configure 3x-ui/Xray socket access if needed
-    if [ "$USE_SOCKET" = true ]; then
+    if true; then
         configure_3xui_socket
+    fi
+
+    # Disable duplicate nginx-panel proxy if present in 3x-ui stack
+    local panel_compose="/opt/3x-ui/docker-compose.yml"
+    if [ -f "$panel_compose" ] && grep -q "nginx-panel" "$panel_compose" 2>/dev/null; then
+        log_warning "Disabling duplicate nginx-panel proxy container on port 8443..."
+        local line_num
+        line_num=$(grep -n "^  nginx:" "$panel_compose" | cut -d: -f1 || true)
+        if [ -n "$line_num" ]; then
+            head -n $((line_num - 1)) "$panel_compose" > "${panel_compose}.tmp"
+            mv "${panel_compose}.tmp" "$panel_compose"
+            (cd /opt/3x-ui && docker compose up -d --remove-orphans) >/dev/null 2>&1 || true
+            log_success "Duplicate nginx-panel container stopped and removed"
+        fi
     fi
 
 
@@ -1521,7 +1590,7 @@ install_command() {
     printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Decoy Domain:" "$domain"
     
     # Show connection mode info for Nginx
-    if [ "$USE_SOCKET" = true ]; then
+    if true; then
         printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Decoy Connection:" "Unix Socket"
         printf "   ${WHITE}%-20s${NC} ${GRAY}%s${NC}\n" "Decoy Socket:" "$SOCKET_PATH"
     else
@@ -1548,7 +1617,7 @@ install_command() {
     echo -e "${GRAY}    Network  : TCP${NC}"
     echo -e "${GRAY}    Security : Reality${NC}"
     echo -e "${GRAY}    Flow     : xtls-rprx-vision${NC}"
-    if [ "$USE_SOCKET" = true ]; then
+    if true; then
         echo -e "${GRAY}    Dest/SNI : $SOCKET_PATH  (xver 1)${NC}"
     else
         echo -e "${GRAY}    Dest     : 127.0.0.1:$port  (xver 1)${NC}"
@@ -1573,7 +1642,7 @@ install_command() {
     echo -e "      }"
     echo -e "    ],"
     echo -e "    \"xhttpSettings\": {"
-    echo -e "      \"path\": \"/xhttp\","
+    echo -e "      \"path\": \"/api/v1/assets/logo.png\","
     echo -e "      \"host\": \"$domain\","
     echo -e "      \"scMaxBufferedPosts\": 30,"
     echo -e "      \"scMaxEachPostBytes\": \"1000000\","
@@ -1596,11 +1665,17 @@ validate_nginx_config() {
     # Make the image available locally (mirror fallback) before validating.
     ensure_image "nginx:${NGINX_VERSION}" || true
 
+    local panel_mount=""
+    if [ -f "/opt/3x-ui/conf.d/panel.conf" ]; then
+        panel_mount="-v /opt/3x-ui/ssl:/etc/nginx/ssl-panel:ro"
+    fi
+
     local out
     if out=$(docker run --rm \
         -v "$APP_DIR/nginx.conf:/etc/nginx/nginx.conf:ro" \
         -v "$APP_DIR/conf.d:/etc/nginx/conf.d:ro" \
         -v "$APP_DIR/ssl:/etc/nginx/ssl:ro" \
+        $panel_mount \
         nginx:${NGINX_VERSION} \
         nginx -t 2>&1); then
         return 0
