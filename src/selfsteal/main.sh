@@ -1120,17 +1120,21 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
 
-    # VLESS-XHTTP routing location block
+    # VLESS-XHTTP routing location block (Aligned with official XTLS/Xray-examples)
     location /xhttp {
-        proxy_redirect off;
-        proxy_pass http://127.0.0.1:$port;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$http_host;
-        # Show real client IP in Xray
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        # xHTTP streams chunks over HTTP/2, client_max_body_size 0 is CRITICAL to prevent Nginx from killing large streams
+        client_max_body_size 0;
+        
+        # Extended timeouts for long-lived proxy streams
+        client_body_timeout 5m;
+        grpc_read_timeout 315s;
+        grpc_send_timeout 5m;
+        
+        grpc_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        
+        # Use grpc_pass to natively handle HTTP/2 multiplexing (xHTTP over H2)
+        # Binds to Unix Socket for zero-overhead internal routing
+        grpc_pass grpc://unix:/dev/shm/nginx-xhttp.socket;
     }
 
     # Standard decoy location block
@@ -1769,13 +1773,12 @@ install_command() {
     echo
     echo -e "${CYAN}  Option B — VLESS + xHTTP behind Nginx (cross-border hops):${NC}"
     echo -e "${GRAY}    Protocol : VLESS${NC}"
-    echo -e "${GRAY}    Port     : 127.0.0.1:47443 (loopback only)${NC}"
+    echo -e "${GRAY}    Listen   : /dev/shm/nginx-xhttp.socket,0666${NC}"
+    echo -e "${GRAY}    Port     : 0${NC}"
     echo -e "${GRAY}    Network  : xHTTP   (path: /xhttp)${NC}"
     echo -e "${GRAY}    Security : none (Nginx handles TLS on port 443)${NC}"
-    echo -e "${GRAY}    SNI tip  : set $domain in Nginx proxy_pass${NC}"
     echo
-    echo -e "${YELLOW}  ⚠️  Enable Mux/XMUX in your client to stay under the 3-parallel-conn DPI limit${NC}"
-    echo
+
     echo -e "${GRAY}   • Change template  : $APP_NAME template${NC}"
     echo -e "${GRAY}   • Customize HTML   : $HTML_DIR${NC}"
     echo -e "${GRAY}   • Check status     : $APP_NAME status${NC}"
