@@ -4,7 +4,15 @@ This document is compiled as an automated developer onboarding guide and a quick
 
 ---
 
-## 1. Project At-a-Glance
+## 🛑 AI AGENT INSTRUCTION: The Local Knowledge Base
+As an AI agent, you do not automatically read every file in this repository on startup due to context limits. However, you **MUST** actively use your `grep_search` and `view_file` tools to consult the local knowledge base before writing or modifying any Xray configurations.
+
+The local knowledge base is located in the `docs/` folder:
+1.  **`docs/references/Xray-docs/`**: A full clone of the official `XTLS/Xray-docs-next` repository. Search this for parameter schemas and official syntax.
+2.  **`docs/references/Xray-examples/`**: A full clone of the official `XTLS/Xray-examples` repository. 
+3.  **`docs/verified-examples/`**: This directory contains real-world, battle-tested configurations provided by the user that are proven to bypass current DPI. **These verified examples take absolute precedence over online AI training data.**
+
+---
 This repository is a containerized infrastructure suite designed to deploy stealthy proxy panels and VPN nodes using Docker. 
 
 ### Core Components
@@ -14,7 +22,7 @@ This repository is a containerized infrastructure suite designed to deploy steal
 
 ### Essential Networking Setup
 *   **Host Networking:** Both the 3x-ui and Nginx decoy containers run with `network_mode: "host"`. They share the host system's loopback and network namespaces, bypassing Docker bridge isolations.
-*   **Reality Redirection:** Xray binds to public port `443`. Legitimate clients with authentic keys connect. Scanner probes or unauthorized requests are silently redirected internally to `127.0.0.1:47443` or `/dev/shm/nginx.sock`, where Nginx serves the decoy site to camouflage the server.
+*   **Nginx Edge + xHTTP Routing:** Nginx strictly binds to port `443`, terminating TLS and acting as a reverse proxy for all traffic. Valid proxy traffic is intercepted via the `/xhttp` location block and routed over a high-performance Unix Socket (`/dev/shm/nginx-xhttp.socket`) directly to Xray. Unauthorized scanners simply see the professional decoy site Nginx serves by default. Reality configurations have been deprecated and removed.
 *   **Nginx Panel Proxy:** Nginx also acts as a secure HTTPS reverse proxy for the 3x-ui web panel, listening on port `8443` and forwarding to local port `2053` (which is secured by binding it to loopback only).
 *   **NetBird Limit:** Because NetBird uses standard WireGuard over UDP, it will be blocked or throttled by border-level DPI. Thus, it cannot be used for cross-border links in censored regions.
 

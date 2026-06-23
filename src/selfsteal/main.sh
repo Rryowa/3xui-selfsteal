@@ -88,9 +88,7 @@ RANDOMIZE_TEMPLATE=true
 # Socket Configuration (Nginx only)
 # By default uses Unix socket for better performance
 # Use --tcp flag to switch to TCP port
-USE_SOCKET=true
 SOCKET_PATH="/dev/shm/nginx.sock"
-USE_XHTTP=false
 
 # Docker Configuration for Nginx decoy
 CONTAINER_NAME="nginx-selfsteal"
@@ -154,9 +152,6 @@ show_help() {
     echo -e "  ${CYAN}$APP_NAME${NC} [${GRAY}command${NC}] [${GRAY}options${NC}]"
     echo
     echo -e "${WHITE}Options:${NC}"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--socket" "Use Unix socket (default)"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--tcp" "Use TCP port instead of socket"
-    printf "   ${CYAN}%-22s${NC} %s\n" "--xhttp" "Use VLESS+xHTTP reverse proxy mode (no Reality)"
     printf "   ${CYAN}%-22s${NC} %s\n" "--acme-port <port>" "Custom port for ACME TLS-ALPN"
     printf "   ${CYAN}%-22s${NC} %s\n" "--no-randomize" "Don't mutate templates on install"
     printf "   ${CYAN}%-22s${NC} %s\n" "--test, --staging" "Use Let's Encrypt staging environment"
@@ -245,22 +240,6 @@ while [ $# -gt 0 ]; do
             ;;
         --debug)
             # Already handled at the top of the script
-            shift
-            ;;
-        --tcp)
-            # Use TCP port instead of Unix socket
-            USE_SOCKET=false
-            shift
-            ;;
-        --xhttp)
-            # Use VLESS+xHTTP behind Nginx (no Reality)
-            USE_XHTTP=true
-            USE_SOCKET=false
-            shift
-            ;;
-        --socket)
-            # Use Unix socket (default)
-            USE_SOCKET=true
             shift
             ;;
         --no-randomize|--no-mutate)
@@ -722,11 +701,7 @@ validate_domain_dns() {
     echo -e "${GRAY}   • Domain must point to this server ✓${NC}"
     echo -e "${GRAY}   • Port 443 must be free for Xray ✓${NC}"
     echo -e "${GRAY}   • Port 80 will be used for HTTP → HTTPS redirects${NC}"
-    if [ "$USE_SOCKET" = true ]; then
-        echo -e "${GRAY}   • Nginx will use Unix socket: $SOCKET_PATH${NC}"
-    else
-        echo -e "${GRAY}   • Nginx will serve content on internal port${NC}"
-    fi
+    echo -e "${GRAY}   • Nginx will route xHTTP to Unix socket: /dev/shm/nginx-xhttp.socket${NC}"
     echo -e "${GRAY}   • Configure Xray Reality AFTER installation${NC}"
     
     echo
@@ -944,7 +919,6 @@ EOF
     [ "$DEBUG_MODE" = true ] && echo "DEBUG: SSL certificate process completed, creating docker-compose.yml"
 
     # Create docker-compose.yml with socket or TCP configuration
-    if [ "$USE_SOCKET" = true ]; then
         cat > "$APP_DIR/docker-compose.yml" << EOF
 services:
   nginx:
@@ -968,30 +942,6 @@ services:
         max-file: "3"
 EOF
         log_success "docker-compose.yml created (Unix socket mode)"
-    else
-        cat > "$APP_DIR/docker-compose.yml" << EOF
-services:
-  nginx:
-    image: nginx:${NGINX_VERSION}
-    container_name: ${CONTAINER_NAME}
-    restart: unless-stopped
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./conf.d:/etc/nginx/conf.d:ro
-      - ${HTML_DIR}:/var/www/html:ro
-      - ./logs:/var/log/nginx
-      - ./ssl:/etc/nginx/ssl:ro
-    env_file:
-      - .env
-    network_mode: "host"
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-EOF
-        log_success "docker-compose.yml created (TCP port mode)"
-    fi
     
     # Create conf.d directory
     create_dir_safe "$APP_DIR/conf.d" || return 1
@@ -1064,7 +1014,6 @@ EOF
     log_success "nginx.conf created"
 
     # Create site configuration based on socket, TCP, or xHTTP mode
-    if [ "$USE_XHTTP" = true ]; then
         # VLESS-xHTTP reverse proxy configuration
         cat > "$APP_DIR/conf.d/selfsteal.conf" << EOF
 # HTTP server - redirect and ACME challenge
@@ -1150,171 +1099,6 @@ server {
 }
 EOF
         log_success "Nginx site configuration created (VLESS-xHTTP reverse proxy)"
-    elif [ "$USE_SOCKET" = true ]; then
-        # Unix socket configuration for Xray Reality
-        cat > "$APP_DIR/conf.d/selfsteal.conf" << EOF
-# HTTP server - redirect and ACME challenge
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name $domain;
-    
-    # ACME challenge for Let's Encrypt certificate renewal
-    location /.well-known/acme-challenge/ {
-        root /var/www/html;
-        try_files \$uri =404;
-    }
-    
-    # Redirect all other traffic to HTTPS
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
-# HTTPS server via Unix socket with proxy_protocol (for Xray Reality)
-# Xray forwards traffic to $SOCKET_PATH with xver: 1 (proxy_protocol v1)
-server {
-    listen unix:$SOCKET_PATH ssl proxy_protocol http2;
-    server_name $domain;
-
-    # SSL Configuration with ACME certificates
-    ssl_certificate /etc/nginx/ssl/fullchain.crt;
-    ssl_certificate_key /etc/nginx/ssl/private.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 1d;
-    ssl_session_tickets off;
-
-    # OCSP Stapling (faster TLS handshake)
-    ssl_stapling on;
-    ssl_stapling_verify on;
-    resolver 1.1.1.1 8.8.8.8 valid=300s;
-    resolver_timeout 5s;
-
-    # Logging (proxy_protocol format includes real client IP)
-    access_log /var/log/nginx/access.log proxy_protocol;
-    error_log /var/log/nginx/error.log warn;
-
-    # Root directory
-    root /var/www/html;
-    index index.html index.htm;
-
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-
-    location / {
-        try_files \$uri \$uri/ /index.html;
-    }
-
-    # Cache static files
-    location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-    }
-}
-EOF
-        log_success "Nginx site configuration created (Unix socket: $SOCKET_PATH)"
-        
-        # Show Xray configuration hint
-        echo
-        echo -e "${CYAN}📋 Xray Reality Configuration:${NC}"
-        echo -e "${GRAY}───────────────────────────────────────${NC}"
-        echo -e "${WHITE}   \"target\": \"$SOCKET_PATH\",${NC}"
-        echo -e "${WHITE}   \"xver\": 1${NC}"
-        echo -e "${GRAY}───────────────────────────────────────${NC}"
-        
-    else
-        # TCP port configuration
-        cat > "$APP_DIR/conf.d/selfsteal.conf" << EOF
-# HTTP server - redirect and ACME challenge
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name $domain;
-    
-    # ACME challenge for Let's Encrypt certificate renewal
-    location /.well-known/acme-challenge/ {
-        root /var/www/html;
-        try_files \$uri =404;
-    }
-    
-    # Redirect all other traffic to HTTPS
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
-# HTTPS server with proxy_protocol support (for Reality)
-# Port 443 is reserved for Xray - all HTTPS traffic comes via proxy_protocol
-server {
-    listen 127.0.0.1:$port ssl proxy_protocol http2;
-    server_name $domain;
-
-    # SSL Configuration with ACME certificates
-    ssl_certificate /etc/nginx/ssl/fullchain.crt;
-    ssl_certificate_key /etc/nginx/ssl/private.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 1d;
-    ssl_session_tickets off;
-
-    # OCSP Stapling (faster TLS handshake)
-    ssl_stapling on;
-    ssl_stapling_verify on;
-    resolver 1.1.1.1 8.8.8.8 valid=300s;
-    resolver_timeout 5s;
-
-    # Logging (proxy_protocol format includes real client IP)
-    access_log /var/log/nginx/access.log proxy_protocol;
-    error_log /var/log/nginx/error.log warn;
-
-    # Root directory
-    root /var/www/html;
-    index index.html index.htm;
-
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-
-    location / {
-        try_files \$uri \$uri/ /index.html;
-    }
-
-    # Cache static files
-    location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-    }
-}
-
-# Fallback server for direct port access (returns 204)
-server {
-    listen 127.0.0.1:$port ssl default_server;
-    server_name _;
-
-    ssl_certificate /etc/nginx/ssl/fullchain.crt;
-    ssl_certificate_key /etc/nginx/ssl/private.key;
-
-    return 204;
-}
-EOF
-        log_success "Nginx site configuration created (TCP port: $port)"
-        
-        # Show Xray configuration hint
-        echo
-        echo -e "${CYAN}📋 Xray Reality Configuration:${NC}"
-        echo -e "${GRAY}───────────────────────────────────────${NC}"
-        echo -e "${WHITE}   \"target\": \"127.0.0.1:$port\",${NC}"
-        echo -e "${WHITE}   \"xver\": 1${NC}"
-        echo -e "${GRAY}───────────────────────────────────────${NC}"
-    fi
 }
 
 # Auto-inbound setup removed — manual configuration via 3x-ui panel is more reliable
@@ -1771,7 +1555,7 @@ install_command() {
     fi
     echo -e "${GRAY}    serverNames: [\"$domain\"]${NC}"
     echo
-    echo -e "${CYAN}  Option B — VLESS + xHTTP behind Nginx (cross-border hops):${NC}"
+    echo -e "${CYAN}  VLESS + xHTTP via Nginx Unix Socket:${NC}"
     echo -e "${GRAY}    Protocol : VLESS${NC}"
     echo -e "${GRAY}    Listen   : /dev/shm/nginx-xhttp.socket,0666${NC}"
     echo -e "${GRAY}    Port     : 0${NC}"

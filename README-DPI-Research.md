@@ -13,7 +13,7 @@ The repository [3xui-selfsteal](file:///root/3xui-selfsteal) is a deployment sui
 ### Networking Implementation:
 *   Both the 3x-ui and Nginx Selfsteal containers run with `network_mode: "host"`.
 *   This bypasses Docker's internal virtual network bridge (`docker0`), allowing both containers to share the host's loopback and network interface.
-*   **The Reality Decoy Mechanism:** Xray binds to public port `443`. Legitimate VPN clients present the correct cryptographic key and connect. Active probes, firewalls, or regular internet traffic presenting an incorrect key are silently forwarded internally to `127.0.0.1:47443` (or via Unix socket at `/dev/shm/nginx.sock`), where Nginx serves the decoy site, effectively masking the proxy server.
+*   **The xHTTP Unix Socket Mechanism:** Nginx exclusively binds to port `443` and terminates all TLS connections. Active probes and normal internet traffic are served the decoy site. Legitimate VPN clients hit the hidden `/xhttp` location block, which uses `grpc_pass` to stream traffic over a local Unix Socket (`/dev/shm/nginx-xhttp.socket`) to Xray. This completely deprecates edge Reality setups for maximum stability against DPI.
 
 ---
 
