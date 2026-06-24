@@ -26,7 +26,7 @@ This repository is a containerized infrastructure suite designed to deploy steal
 ### Core Components
 1.  **3x-ui Docker Panel (`src/dest/3x-ui-docker.sh`):** Installs the `ghcr.io/mhsanaei/3x-ui` panel. This web panel runs Xray-core in the background and dynamically manages inbounds (VLESS, VMess, Trojan, Shadowsocks) stored in a SQLite database (`/opt/3x-ui/db/x-ui.db`).
 2.  **Nginx Selfsteal (`src/dest/selfsteal.sh`):** Sets up Nginx as a "Reality" decoy server. It templates professional decoy sites (YouTube, converters, speedtests) to present to unauthorized scanners.
-3.  **NetBird mesh VPN (`netbird.sh`):** Sets up an encrypted mesh networking tunnel via WireGuard between server nodes.
+3.  **NetBird mesh VPN (`src/netbird.sh`):** Sets up an encrypted mesh networking tunnel via WireGuard between server nodes.
 
 ### Essential Networking Setup
 *   **Host Networking:** Both the 3x-ui and Nginx decoy containers run with `network_mode: "host"`. They share the host system's loopback and network namespaces, bypassing Docker bridge isolations.

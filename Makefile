@@ -2,11 +2,11 @@
 
 build: src/dest/selfsteal.sh src/dest/3x-ui-docker.sh
 
-src/dest/selfsteal.sh: src/selfsteal/main.sh src/build.sh xhttp-client-import.json $(shell find src/selfsteal src/common -type f -name '*.sh')
+src/dest/selfsteal.sh: src/selfsteal/main.sh src/build.sh src/xhttp-client-import.json $(shell find src/selfsteal src/common -type f -name '*.sh')
 	@mkdir -p src/dest
 	@echo "Building src/dest/selfsteal.sh..."
 	@echo -n "XHTTP_JSON_TEMPLATE='" > src/selfsteal/xhttp_template.sh
-	@cat xhttp-client-import.json >> src/selfsteal/xhttp_template.sh
+	@cat src/xhttp-client-import.json >> src/selfsteal/xhttp_template.sh
 	@echo "'" >> src/selfsteal/xhttp_template.sh
 	@bash src/build.sh src/selfsteal/main.sh > src/dest/selfsteal.sh
 	@chmod +x src/dest/selfsteal.sh
@@ -22,7 +22,7 @@ clean:
 	@rm -f selfsteal.sh
 
 sysprep:
-	@bash ./sysprep.sh
+	@bash ./src/sysprep.sh
 
 3x-ui: build
 	@rm -f /dev/shm/nginx-xhttp.socket
@@ -33,7 +33,7 @@ selfsteal: build
 	@./src/dest/selfsteal.sh install $(ARGS)
 
 netbird:
-	@bash ./netbird.sh menu
+	@bash ./src/netbird.sh menu
 
 test:
 	@bash ./tests/run_tests.sh

@@ -49,8 +49,7 @@ XHTTP_JSON_TEMPLATE='{
       "scMinPostsIntervalMs": "20-30",
       "scStreamUpServerSecs": "45-90",
       "uplinkChunkSize": 4000,
-      "sessionIDPlacement": "header",
-      "sessionIDKey": "X-Session-Id",
+      "sessionIDPlacement": "path",
       "xmux": {
         "maxConcurrency": "16",
         "hMaxReusableSecs": "300"
