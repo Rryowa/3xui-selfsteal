@@ -1,25 +1,32 @@
-# 3x-ui & Nginx Selfsteal Proxy Deployment Suite
+# 3x-ui Selfsteal — Stealthy Proxy Deployment Suite
 
-Stealthy VPN node deployment infrastructure utilizing **Docker**, **Nginx**, and **3x-ui** (Xray-core) optimized for bypassing Deep Packet Inspection (DPI) censorship.
+Containerized deployment suite for **VLESS + xHTTP** proxy infrastructure using **Docker**, **Nginx**, and **3x-ui** (Xray-core). Optimized for bypassing Deep Packet Inspection (DPI) censorship, including Russia's TSPU "Siberian" behavioral module (June 2026).
+
+> **Architecture**: Nginx terminates TLS on port 443 and forwards the `/xhttp` location over a Unix socket directly to Xray. Reality is deprecated in favor of xHTTP which disguises proxy traffic as standard HTTP/2 API calls.
 
 ---
 
-## 📦 Project Components
+## 📦 Components
 
-1. **System Pre-setup (`sysprep.sh`)**: Performs system updates, swap setup, time synchronization, SSH hardening, and kernel tuning (BBR, TCP Fast Open, buffer tuning).
-2. **3x-ui Docker Panel (`3x-ui-docker.sh`)**: Sets up the Xray management web panel in host network mode (with optional HTTPS reverse proxy).
-3. **Nginx Selfsteal (`selfsteal.sh`)**: Sets up Nginx as a Reality decoy server.
-4. **NetBird VPN (`netbird.sh`)**: Configures encrypted mesh networking via WireGuard.
+| Script | Purpose |
+|---|---|
+| `src/sysprep.sh` | System updates, BBR/TCP tuning, swap setup, SSH hardening |
+| `src/dest/3x-ui-docker.sh` | Deploys 3x-ui panel in Docker with HTTPS reverse proxy |
+| `src/dest/selfsteal.sh` | Deploys Nginx decoy + xHTTP socket routing + auto-configures Xray inbound |
+| `src/netbird.sh` | NetBird WireGuard mesh VPN (for domestic/internal links only) |
 
 ---
 
 ## 🚀 Key Features
 
-* **Reality Masking**: Directs unauthorized probes from port 443 to Nginx via Unix socket `/dev/shm/nginx.sock` or TCP port `47443`.
-* **AI-Generated Decoys**: 11 unique website templates used for HTTPS masking.
-* **Anti-Fingerprinting**: Automatically mutates template files, CSS colors, HTML headers, and assets per-install to avoid byte-identical signature tracking.
-* **Secure Panel Reverse Proxy**: Locks the 3x-ui database `webListen` to `127.0.0.1`. Proxies encrypted admin traffic through Nginx on port `8443` to the panel.
-* **Auto-Renewing SSL**: Built-in Let's Encrypt certificates management via `acme.sh` using TLS-ALPN-01 challenge.
+- **xHTTP Transport** — Splits proxy traffic into discrete HTTP/2 POST/GET chunks, indistinguishable from REST API traffic. Replaces Reality.
+- **Nginx Edge** — Nginx terminates TLS on port 443. Unauthorized scanners see a decoy website. Legitimate clients hit the hidden `/xhttp` path.
+- **Unix Socket Routing** — Nginx proxies xHTTP traffic over `/dev/shm/nginx-xhttp.socket` directly to Xray. Zero Docker bridge overhead.
+- **Auto-configured Xray Inbound** — On install, `selfsteal` writes the VLESS xHTTP inbound directly into the 3x-ui SQLite database.
+- **11 Decoy Templates** — Professional decoy websites downloaded and installed per-template.
+- **Anti-Fingerprint Mutation** — Per-install CSS hue rotation and brand name mutation to prevent byte-identical template signatures.
+- **Secure Panel Proxy** — 3x-ui panel bound to `127.0.0.1:2053`, exposed via Nginx HTTPS on port 443 at the panel subdomain.
+- **Auto-Renewing SSL** — Let's Encrypt certificates via `acme.sh` using TLS-ALPN-01, with cron auto-renewal.
 
 ---
 
@@ -27,114 +34,162 @@ Stealthy VPN node deployment infrastructure utilizing **Docker**, **Nginx**, and
 
 ```
 .
-├── src/                      # Modular script source files
-│   ├── selfsteal/            # Nginx/SSL configuration scripts
-│   ├── common/               # Core helpers (Docker, logging, firewall)
-│   ├── 3x-ui-docker/         # 3x-ui configuration source
-│   ├── dest/                 # Compiled standalone scripts (gitignored)
-│   │   ├── selfsteal.sh
-│   │   └── 3x-ui-docker.sh
-│   └── build.sh              # Script builder utility
-├── sysprep.sh                # System pre-setup (BBR tuning, swap, updates)
-├── netbird.sh                # NetBird mesh VPN setup script
-└── Makefile                  # Project build commands
+├── src/
+│   ├── build.sh                  # Script bundler (inlines source directives)
+│   ├── xhttp-client-import.json  # Default xHTTP inbound import template
+│   ├── sysprep.sh                # System tuning script
+│   ├── netbird.sh                # NetBird mesh VPN script
+│   ├── 3x-ui-docker/             # 3x-ui panel source
+│   ├── selfsteal/                # Nginx decoy source (modular)
+│   ├── common/                   # Shared helpers (logging, docker, firewall)
+│   └── dest/                     # Compiled standalone scripts (gitignored)
+│       ├── selfsteal.sh
+│       └── 3x-ui-docker.sh
+├── docs/
+│   ├── dpi-research.md           # TSPU "Siberian" block research & workarounds
+│   ├── multi-node-setup.md       # Multi-node 3x-ui star topology guide
+│   ├── xhttp-bulletproof-config.md  # xHTTP anti-DPI parameter reference
+│   ├── testing-guide.md          # Manual test commands
+│   └── references/               # Cloned Xray-docs, Xray-examples, 3x-ui source
+├── tests/
+│   └── run_tests.sh              # Integration test suite
+├── Makefile
+└── README.md
 ```
 
 ---
 
-## 🛠️ How to Run
+## 🛠️ Installation
 
 > [!NOTE]
-> All deployment scripts validate that the user is running as `root` firstly. Therefore, you do not need to prepend `sudo` to the commands; run them directly as `root` or using `make`.
+> All scripts require `root`. Run directly as root or via `make`.
 
-### Quick Install (Complete Setup)
-To compile, run the system tuner, deploy the 3x-ui panel, and set up Nginx decoy:
-```bash
-make install-all
-```
-
----
-
-### Step-by-Step Installation
-
-#### 1. Compile Standalone Scripts
+### Step 1 — Build Compiled Scripts
 ```bash
 make build
 ```
 
-#### 2. Pre-setup System (BBR, Swap, Updates)
+### Step 2 — System Pre-setup (Optional but Recommended)
 ```bash
-make install-sysprep
+make sysprep
+```
+Sets up swap, BBR congestion control, TCP Fast Open, SSH hardening.
+
+### Step 3 — Deploy 3x-ui Panel
+```bash
+make 3x-ui ARGS="--secure --domain panel.yourdomain.com --force"
 ```
 
-#### 3. Deploy 3x-ui Panel
+| Flag | Description |
+|---|---|
+| `--secure` | Enable HTTPS reverse proxy for the panel |
+| `--domain` | Panel subdomain (must have valid DNS + certificate) |
+| `--force` | Skip DNS validation |
+
+Panel access after install: `https://panel.yourdomain.com` (default credentials: `admin` / `admin` — change immediately)
+
+### Step 4 — Deploy Nginx Selfsteal Decoy
 ```bash
-make install-3x-ui
+make selfsteal ARGS="--force --domain filecloud.yourdomain.com --template 5"
 ```
 
-#### 4. Deploy Nginx Decoy (Interactive)
-```bash
-make install-selfsteal
-```
-*Alternatively, run in non-interactive force mode:*
-```bash
-make install-selfsteal ARGS="--force --domain your-domain.com"
-```
+| Flag | Description |
+|---|---|
+| `--force` | Skip DNS validation and prompts |
+| `--domain` | Public domain for the decoy site |
+| `--template <1-11>` | Decoy website template number |
+| `--ssl-cert` / `--ssl-key` | Use existing certificate instead of ACME |
+| `--no-randomize` | Skip per-install template mutation |
+
+On success, the xHTTP inbound is **automatically written** to the 3x-ui database. Copy the printed JSON from the install output and import it into the 3x-ui panel if needed.
 
 ---
 
-## 🧪 How to Test
+## 🎨 Decoy Templates
 
-### 1. Run Staging Test Install
-Uses Let's Encrypt staging environment to bypass API rate limits:
-```bash
-./src/dest/selfsteal.sh --domain your-domain.com --test --force install
-```
-
-### 2. Check Service Status
-```bash
-./src/dest/selfsteal.sh status
-```
-
-### 3. Verify Panel Proxy (GET)
-Verify that Nginx successfully reverse-proxies the panel on port 8443:
-```bash
-curl -k -s -o /dev/null -w "%{http_code}\n" --resolve your-domain.com:8443:127.0.0.1 https://your-domain.com:8443/
-```
-*(Note: 3x-ui returns `404` for `HEAD` requests. Avoid curl -I (which sends HEAD).)*
-
-### 4. Verify Docker Socket Mounting
-Verify the socket is reachable inside the container:
-```bash
-docker exec 3xui_app ls -la /dev/shm/nginx.sock
-```
+| # | Name | Description |
+|---|---|---|
+| 1 | 😂 10gag | Meme site |
+| 2 | 📁 Convertit | File converter |
+| 3 | 🎬 Converter | Video studio converter |
+| 4 | ⬇️ Downloader | File downloader |
+| 5 | ☁️ FileCloud | Cloud storage |
+| 6 | 🎮 Games-site | Retro gaming portal |
+| 7 | 🛠️ ModManager | Game mod manager |
+| 8 | 🚀 SpeedTest | Internet speedtest |
+| 9 | 📺 YouTube | Video hosting with captcha |
+| 10 | ⚠️ 503 Error v1 | Maintenance error page |
+| 11 | ⚠️ 503 Error v2 | Maintenance error page (alt) |
 
 ---
 
-## ⚙️ Xray Reality Configuration
+## 🌐 Architecture
 
-Add this inbound to your Xray / 3x-ui configuration:
+```
+User Client
+    │  VLESS + xHTTP over TLS
+    ▼
+Nginx (port 443)  ──── decoy site ────▶  Unauthorized Scanner
+    │  /xhttp location
+    │  grpc_pass → Unix Socket
+    ▼
+/dev/shm/nginx-xhttp.socket
+    │
+    ▼
+Xray (3x-ui)  ──▶  Internet
+```
+
+**Nginx config key directives:**
+- `grpc_pass grpc://unix:/dev/shm/nginx-xhttp.socket` — HTTP/2 native passthrough
+- `client_max_body_size 0` — prevents Nginx killing large upload streams
+- `client_body_timeout 5m` / `grpc_read_timeout 315s` — stream longevity
+
+---
+
+## 🧪 Testing
+
+```bash
+make test
+```
+
+The integration test suite (`tests/run_tests.sh`) verifies:
+1. Docker containers (`nginx-selfsteal`, `3xui_app`) are running
+2. SQLite database has the `xhttp-inbound` config and `user-xhttp` client
+3. Unix socket `/dev/shm/nginx-xhttp.socket` exists and is live
+4. Nginx HTTP/2 POST to `/xhttp` path returns `404` (correct Xray backend signature)
+5. Panel HTTPS proxy is reachable
+6. **Headless Xray client** opens SOCKS5 tunnel → sends request through VLESS+xHTTP → verifies HTTP 200 roundtrip
+
+---
+
+## 📡 Client Configuration
+
+After install, the panel outputs the importable inbound JSON. Key parameters:
 
 ```json
 {
-  "listen": "0.0.0.0",
-  "port": 443,
-  "protocol": "vless",
-  "settings": {
-    "clients": [],
-    "decryption": "none"
-  },
-  "streamSettings": {
-    "network": "tcp",
-    "security": "reality",
-    "realitySettings": {
-      "show": false,
-      "dest": "/dev/shm/nginx.sock",
-      "xver": 1,
-      "serverNames": ["your-domain.com"],
-      "privateKey": "YOUR_PRIVATE_KEY",
-      "shortIds": ["YOUR_SHORT_ID"]
-    }
+  "network": "xhttp",
+  "security": "none",
+  "xhttpSettings": {
+    "path": "/api/v1/assets/logo.png",
+    "mode": "packet-up",
+    "sessionIDPlacement": "path",
+    "enableXmux": true,
+    "noSSEHeader": true,
+    "noGRPCHeader": true,
+    "xPaddingBytes": "100-800"
   }
 }
 ```
+
+> [!IMPORTANT]
+> `sessionIDPlacement` is set to `"path"` for compatibility with standard clients (v2rayN, Shadowrocket, etc.) that don't support header-based session IDs on standard link imports.
+
+---
+
+## 📚 Further Reading
+
+- [`docs/dpi-research.md`](docs/dpi-research.md) — TSPU "Siberian" behavioral block analysis and workarounds
+- [`docs/xhttp-bulletproof-config.md`](docs/xhttp-bulletproof-config.md) — Full xHTTP anti-DPI parameter reference
+- [`docs/multi-node-setup.md`](docs/multi-node-setup.md) — Multi-node star topology with 3x-ui
+- [`docs/references/`](docs/references/) — Official Xray-docs and Xray-examples clones
